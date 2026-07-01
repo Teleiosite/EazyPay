@@ -1,0 +1,6 @@
+{
+  "name": "EazyPay",
+  "description": "Role-based offline-first campus NFC payment system starting with visual simulation and interactive demo flows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
