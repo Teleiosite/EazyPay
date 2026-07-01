@@ -19,6 +19,9 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
     private val repository = EazyPayRepository(application)
 
     val currentRole = repository.currentRole
+    val isRegistered = repository.isRegistered
+    val isBiometricEnabled = repository.isBiometricEnabled
+    val registeredCards = repository.registeredCards
     val isOffline = repository.isOffline
     val isSyncing = repository.isSyncing
     val student = repository.student
@@ -76,6 +79,26 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             repository.setRole(role)
         }
+    }
+
+    fun setRegistered(registered: Boolean, phone: String? = null, role: String? = null) {
+        repository.setRegistered(registered, phone, role)
+    }
+
+    fun setBiometricEnabled(enabled: Boolean) {
+        repository.setBiometricEnabled(enabled)
+    }
+
+    fun addNfcCard(cardName: String) {
+        repository.addNfcCard(cardName)
+    }
+
+    fun removeNfcCard(cardName: String) {
+        repository.removeNfcCard(cardName)
+    }
+
+    fun updateStudentDetails(name: String, email: String, phone: String, department: String, level: String) {
+        repository.updateStudentDetails(name, email, phone, department, level)
     }
 
     fun toggleOffline() {

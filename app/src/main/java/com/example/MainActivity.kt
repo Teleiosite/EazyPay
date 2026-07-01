@@ -48,8 +48,21 @@ fun EazyPayAppNavigator() {
         composable("splash") {
             SplashScreen(
                 onNavigate = {
-                    navController.navigate("onboarding") {
-                        popUpTo("splash") { inclusive = true }
+                    if (viewModel.isRegistered.value) {
+                        val role = viewModel.currentRole.value
+                        if (role == "student") {
+                            navController.navigate("student_main") {
+                                popUpTo("splash") { inclusive = true }
+                            }
+                        } else {
+                            navController.navigate("vendor_main") {
+                                popUpTo("splash") { inclusive = true }
+                            }
+                        }
+                    } else {
+                        navController.navigate("onboarding") {
+                            popUpTo("splash") { inclusive = true }
+                        }
                     }
                 }
             )
@@ -92,6 +105,7 @@ fun EazyPayAppNavigator() {
             SetPinScreen(
                 onPinSet = { pin ->
                     viewModel.setPin(pin)
+                    viewModel.setRegistered(true, currentPhone, chosenRole)
                     if (chosenRole == "student") {
                         navController.navigate("student_main") {
                             popUpTo("register") { inclusive = true }
@@ -109,6 +123,7 @@ fun EazyPayAppNavigator() {
             StudentMainScreen(
                 viewModel = viewModel,
                 onSignOut = {
+                    viewModel.setRegistered(false)
                     navController.navigate("register") {
                         popUpTo("student_main") { inclusive = true }
                     }
@@ -120,6 +135,7 @@ fun EazyPayAppNavigator() {
             VendorMainScreen(
                 viewModel = viewModel,
                 onSignOut = {
+                    viewModel.setRegistered(false)
                     navController.navigate("register") {
                         popUpTo("vendor_main") { inclusive = true }
                     }

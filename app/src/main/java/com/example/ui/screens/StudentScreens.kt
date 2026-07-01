@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,10 +28,12 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.Offer
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import com.example.data.StudentUser
@@ -142,7 +145,11 @@ fun StudentMainScreen(
                 )
                 "pay" -> StudentPayScreen(viewModel = viewModel)
                 "history" -> StudentHistoryScreen(viewModel = viewModel)
-                "profile" -> StudentProfileScreen(viewModel = viewModel, onSignOut = onSignOut)
+                "profile" -> StudentProfileScreen(
+                    viewModel = viewModel,
+                    onSignOut = onSignOut,
+                    onSupportClick = { showSupport = true }
+                )
             }
 
             // Top-up Modal Bottom Sheet Overlay
@@ -1459,143 +1466,955 @@ fun ReceiptDetailRow(label: String, valStr: String) {
 @Composable
 fun StudentProfileScreen(
     viewModel: EazyPayViewModel,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    onSupportClick: () -> Unit
 ) {
     val studentUser by viewModel.student.collectAsState()
     val clipboardManager = LocalClipboardManager.current
+    var activeModal by remember { mutableStateOf<String?>(null) } // "personal", "nfc", "biometrics", "pin", "help", "privacy"
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // Avatar Header
-        Box(
-            modifier = Modifier
-                .size(80.dp)
-                .clip(CircleShape)
-                .background(PrimaryTeal.copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center
-        ) {
-            val initials = studentUser.name.split(" ").mapNotNull { it.firstOrNull() }.joinToString("")
-            Text(
-                text = initials,
-                color = PrimaryTeal,
-                fontWeight = FontWeight.Bold,
-                fontSize = 28.sp
-            )
-        }
-        
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = studentUser.name,
-                color = TextPrimary,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "Nigeria • +234 ${studentUser.phone}",
-                color = TextSecondary,
-                fontSize = 13.sp
-            )
-        }
-
-        // Student EazyPay ID details
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Surface),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, Border)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text("MY CAMPUS EAZYPAY ID", color = TextSecondary, fontSize = 9.sp)
-                    Text(
-                        text = studentUser.id,
-                        color = TextPrimary,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Button(
-                    onClick = { clipboardManager.setText(AnnotatedString(studentUser.id)) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Border),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                ) {
-                    Text("Copy ID", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        // Profile lists
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                text = "ACCOUNT CONFIGURATION",
-                color = TextSecondary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp,
-                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-            )
+            // Avatar Header
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .background(PrimaryTeal.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                val initials = studentUser.name.split(" ").mapNotNull { it.firstOrNull() }.joinToString("")
+                Text(
+                    text = initials,
+                    color = PrimaryTeal,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 28.sp
+                )
+            }
+            
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = studentUser.name,
+                    color = TextPrimary,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Nigeria • +234 ${studentUser.phone.removePrefix("+234").trim()}",
+                    color = TextSecondary,
+                    fontSize = 13.sp
+                )
+            }
 
-            val settings = listOf(
-                Pair("Personal details", Icons.Outlined.Person),
-                Pair("Registered NFC cards", Icons.Outlined.Nfc),
-                Pair("Biometrics lock", Icons.Outlined.Fingerprint),
-                Pair("Change security PIN", Icons.Outlined.Lock),
-                Pair("Help Center & FAQ", Icons.Outlined.HelpOutline),
-                Pair("Privacy Policy & Terms", Icons.Outlined.Info)
-            )
-
-            settings.forEach { item ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Surface),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, Border)
+            // Student EazyPay ID details
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Surface),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Border)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                    Column {
+                        Text("MY CAMPUS EAZYPAY ID", color = TextSecondary, fontSize = 9.sp)
+                        Text(
+                            text = studentUser.id,
+                            color = TextPrimary,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Button(
+                        onClick = { clipboardManager.setText(AnnotatedString(studentUser.id)) },
+                        colors = ButtonDefaults.buttonColors(containerColor = Border),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(item.second, contentDescription = item.first, tint = PrimaryTeal, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(item.first, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        Icon(Icons.Default.ChevronRight, contentDescription = "Go", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                        Text("Copy ID", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            // Profile lists
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "ACCOUNT CONFIGURATION",
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+                )
 
-            Button(
-                onClick = onSignOut,
+                val settings = listOf(
+                    Pair("Personal details", Icons.Outlined.Person),
+                    Pair("Registered NFC cards", Icons.Outlined.Nfc),
+                    Pair("Biometrics lock", Icons.Outlined.Fingerprint),
+                    Pair("Change security PIN", Icons.Outlined.Lock),
+                    Pair("Help Center & FAQ", Icons.Outlined.HelpOutline),
+                    Pair("Privacy Policy & Terms", Icons.Outlined.Info)
+                )
+
+                settings.forEach { item ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Surface),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                activeModal = when (item.first) {
+                                    "Personal details" -> "personal"
+                                    "Registered NFC cards" -> "nfc"
+                                    "Biometrics lock" -> "biometrics"
+                                    "Change security PIN" -> "pin"
+                                    "Help Center & FAQ" -> "help"
+                                    "Privacy Policy & Terms" -> "privacy"
+                                    else -> null
+                                }
+                            },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Border)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(item.second, contentDescription = item.first, tint = PrimaryTeal, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(item.first, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            Icon(Icons.Default.ChevronRight, contentDescription = "Go", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Button(
+                    onClick = onSignOut,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Danger.copy(alpha = 0.15f))
+                ) {
+                    Text("Sign out account", color = Danger, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // Settings Overlay Modals
+        when (activeModal) {
+            "personal" -> PersonalDetailsModal(viewModel = viewModel, onDismiss = { activeModal = null })
+            "nfc" -> NfcCardsModal(viewModel = viewModel, onDismiss = { activeModal = null })
+            "biometrics" -> BiometricsLockModal(viewModel = viewModel, onDismiss = { activeModal = null })
+            "pin" -> ChangePinModal(viewModel = viewModel, onDismiss = { activeModal = null })
+            "help" -> HelpCenterModal(viewModel = viewModel, onDismiss = { activeModal = null }, onOpenChat = {
+                activeModal = null
+                onSupportClick()
+            })
+            "privacy" -> PrivacyPolicyModal(onDismiss = { activeModal = null })
+        }
+    }
+}
+
+@Composable
+fun PersonalDetailsModal(
+    viewModel: EazyPayViewModel,
+    onDismiss: () -> Unit
+) {
+    val studentUser by viewModel.student.collectAsState()
+    var name by remember { mutableStateOf(studentUser.name) }
+    var email by remember { mutableStateOf(studentUser.email) }
+    var phone by remember { mutableStateOf(studentUser.phone.removePrefix("+234").trim()) }
+    var department by remember { mutableStateOf(studentUser.department) }
+    var level by remember { mutableStateOf(studentUser.level) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Danger.copy(alpha = 0.15f))
+                    .padding(24.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text("Sign out account", color = Danger, fontWeight = FontWeight.Bold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Personal Details", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Full Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = PrimaryTeal,
+                        unfocusedBorderColor = Border,
+                        focusedContainerColor = Surface
+                    )
+                )
+
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("Babcock Email") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = PrimaryTeal,
+                        unfocusedBorderColor = Border,
+                        focusedContainerColor = Surface
+                    )
+                )
+
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text("Phone Number") },
+                    prefix = { Text("+234 ", color = TextPrimary, fontWeight = FontWeight.Bold) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = PrimaryTeal,
+                        unfocusedBorderColor = Border,
+                        focusedContainerColor = Surface
+                    )
+                )
+
+                OutlinedTextField(
+                    value = department,
+                    onValueChange = { department = it },
+                    label = { Text("Department") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = PrimaryTeal,
+                        unfocusedBorderColor = Border,
+                        focusedContainerColor = Surface
+                    )
+                )
+
+                OutlinedTextField(
+                    value = level,
+                    onValueChange = { level = it },
+                    label = { Text("Level") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = PrimaryTeal,
+                        unfocusedBorderColor = Border,
+                        focusedContainerColor = Surface
+                    )
+                )
+
+                Button(
+                    onClick = {
+                        viewModel.updateStudentDetails(name, email, "+234 $phone", department, level)
+                        onDismiss()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal)
+                ) {
+                    Text("Save Changes", color = Background, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NfcCardsModal(
+    viewModel: EazyPayViewModel,
+    onDismiss: () -> Unit
+) {
+    val registeredCards by viewModel.registeredCards.collectAsState()
+    var isScanning by remember { mutableStateOf(false) }
+    var scanStatus by remember { mutableStateOf("Place new tag against back of device") }
+    var newCardName by remember { mutableStateOf("") }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Registered NFC Cards", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                if (!isScanning) {
+                    Text(
+                        "Manage physical NFC/NFT cards, stickers or student keyfobs linked to your EazyPay account.",
+                        color = TextSecondary,
+                        fontSize = 13.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text("LINKED CARDS & STICKERS", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(registeredCards) { card ->
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = Surface),
+                                border = BorderStroke(1.dp, Border),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        Icon(Icons.Default.Contactless, contentDescription = "Card", tint = PrimaryTeal, modifier = Modifier.size(20.dp))
+                                        Column {
+                                            Text(card, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                            Text("Active • Secure Link", color = Success, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.removeNfcCard(card) }
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Danger, modifier = Modifier.size(20.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    OutlinedTextField(
+                        value = newCardName,
+                        onValueChange = { newCardName = it },
+                        placeholder = { Text("e.g. Back-up Wallet Sticker", color = TextMuted) },
+                        label = { Text("Card/Sticker Name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryTeal,
+                            unfocusedBorderColor = Border,
+                            focusedContainerColor = Surface
+                        )
+                    )
+
+                    Button(
+                        onClick = {
+                            if (newCardName.isNotBlank()) {
+                                isScanning = true
+                                scanStatus = "Searching for NFC Antenna broadcast..."
+                            }
+                        },
+                        enabled = newCardName.isNotBlank(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal)
+                    ) {
+                        Text("Register New NFC Tag", color = Background, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    // Scanning Simulation
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        // Pulsing antenna icon
+                        val infiniteTransition = rememberInfiniteTransition(label = "nfc_pulse")
+                        val scale by infiniteTransition.animateFloat(
+                            initialValue = 0.9f,
+                            targetValue = 1.3f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(1200, easing = LinearEasing),
+                                repeatMode = RepeatMode.Reverse
+                            ),
+                            label = "nfc_scale"
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .size(100.dp)
+                                .clip(CircleShape)
+                                .background(PrimaryTeal.copy(alpha = 0.15f))
+                                .border(2.dp, PrimaryTeal, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Nfc,
+                                contentDescription = "NFC Pulse",
+                                tint = PrimaryTeal,
+                                modifier = Modifier.size(48.dp * scale)
+                            )
+                        }
+
+                        Text(
+                            text = scanStatus,
+                            color = TextPrimary,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+
+                        LaunchedEffect(isScanning) {
+                            delay(1800)
+                            scanStatus = "NFC Tag Handshake: Verifying ECDSA key pairs..."
+                            delay(1800)
+                            viewModel.addNfcCard(newCardName)
+                            isScanning = false
+                            newCardName = ""
+                        }
+
+                        Button(
+                            onClick = { isScanning = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = Border),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Cancel scan", color = TextPrimary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BiometricsLockModal(
+    viewModel: EazyPayViewModel,
+    onDismiss: () -> Unit
+) {
+    val isBiometricEnabled by viewModel.isBiometricEnabled.collectAsState()
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Biometric Security", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Icon(
+                    imageVector = Icons.Default.Fingerprint,
+                    contentDescription = "Fingerprint",
+                    tint = PrimaryTeal,
+                    modifier = Modifier.size(72.dp)
+                )
+
+                Text(
+                    text = "Authenticate Offline Tap Payments with Fingerprint / Face ID",
+                    color = TextPrimary,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+
+                Text(
+                    text = "When enabled, EazyPay leverages Android Biometrics API to authenticate contactless transaction logs directly. This eliminates the need to input your 4-digit security PIN at the vendor terminal during rush hour.",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center
+                )
+
+                HorizontalDivider(color = Border)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Enable Biometric Check", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("Verify with finger scan", color = TextSecondary, fontSize = 11.sp)
+                    }
+                    Switch(
+                        checked = isBiometricEnabled,
+                        onCheckedChange = { viewModel.setBiometricEnabled(it) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Background,
+                            checkedTrackColor = PrimaryTeal,
+                            uncheckedThumbColor = TextSecondary,
+                            uncheckedTrackColor = Surface
+                        )
+                    )
+                }
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal)
+                ) {
+                    Text("Done", color = Background, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ChangePinModal(
+    viewModel: EazyPayViewModel,
+    onDismiss: () -> Unit
+) {
+    val userPin by viewModel.userPin.collectAsState()
+    var currentPinInput by remember { mutableStateOf("") }
+    var newPinInput by remember { mutableStateOf("") }
+    var confirmPinInput by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("") }
+    var successMessage by remember { mutableStateOf("") }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Change Security PIN", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Text(
+                    "Your 4-digit security PIN is used offline to authorize contactless transaction tokens at Babcock terminals.",
+                    color = TextSecondary,
+                    fontSize = 13.sp
+                )
+
+                if (successMessage.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Success.copy(alpha = 0.15f))
+                            .border(1.dp, Success, RoundedCornerShape(12.dp))
+                            .padding(14.dp)
+                    ) {
+                        Text(successMessage, color = Success, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal)
+                    ) {
+                        Text("Close", color = Background)
+                    }
+                } else {
+                    if (errorMessage.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Danger.copy(alpha = 0.15f))
+                                .border(1.dp, Danger, RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(errorMessage, color = Danger, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = currentPinInput,
+                        onValueChange = { if (it.length <= 4) currentPinInput = it },
+                        label = { Text("Enter Current 4-Digit PIN") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        visualTransformation = PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryTeal,
+                            unfocusedBorderColor = Border,
+                            focusedContainerColor = Surface
+                        )
+                    )
+
+                    OutlinedTextField(
+                        value = newPinInput,
+                        onValueChange = { if (it.length <= 4) newPinInput = it },
+                        label = { Text("Enter New 4-Digit PIN") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        visualTransformation = PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryTeal,
+                            unfocusedBorderColor = Border,
+                            focusedContainerColor = Surface
+                        )
+                    )
+
+                    OutlinedTextField(
+                        value = confirmPinInput,
+                        onValueChange = { if (it.length <= 4) confirmPinInput = it },
+                        label = { Text("Confirm New 4-Digit PIN") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        visualTransformation = PasswordVisualTransformation(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryTeal,
+                            unfocusedBorderColor = Border,
+                            focusedContainerColor = Surface
+                        )
+                    )
+
+                    Button(
+                        onClick = {
+                            when {
+                                currentPinInput != userPin -> {
+                                    errorMessage = "Current security PIN is incorrect. Try again."
+                                }
+                                newPinInput.length != 4 -> {
+                                    errorMessage = "New PIN must be exactly 4 digits."
+                                }
+                                newPinInput != confirmPinInput -> {
+                                    errorMessage = "PIN confirmation does not match new PIN."
+                                }
+                                else -> {
+                                    viewModel.setPin(newPinInput)
+                                    successMessage = "Your security PIN has been successfully changed offline!"
+                                    errorMessage = ""
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal)
+                    ) {
+                        Text("Change security PIN", color = Background, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun HelpCenterModal(
+    viewModel: EazyPayViewModel,
+    onDismiss: () -> Unit,
+    onOpenChat: () -> Unit
+) {
+    val faqs = listOf(
+        Pair("How does offline payment work?", "EazyPay is powered by local cryptographic secure-element simulation. During a contactless NFC tap, the student app signs a ledger token with an ECDSA secp256k1 key. The vendor terminal validates this offline signature against the Babcock registry instantly."),
+        Pair("Where can I top up my EazyPay wallet?", "You can perform an instant bank transfer to your unique virtual bank details displayed on the top-up page, or visit any Student Union cafeteria terminal agent kiosk to deposit cash offline."),
+        Pair("What if my physical NFC smart card/sticker is lost?", "Block it immediately from this Profile page under 'Registered NFC Cards'. This terminates its cryptographic pairing. You can then register a backup tag or purchase a sticker at the Babcock IT Support desk."),
+        Pair("How are transactions synchronized?", "When either the student or vendor terminal regains cellular or Wi-Fi connectivity, the app launches an automatic background worker which synchronizes all offline ledger hashes securely with Babcock settlement servers.")
+    )
+
+    var expandedIndex by remember { mutableStateOf<Int?>(null) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Help Center & FAQ", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Text("Frequently Asked Questions", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .heightIn(max = 240.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(faqs) { idx, faq ->
+                        val isExpanded = expandedIndex == idx
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Surface),
+                            border = BorderStroke(1.dp, Border),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expandedIndex = if (isExpanded) null else idx }
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(faq.first, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                    Icon(
+                                        imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                        contentDescription = "Expand",
+                                        tint = PrimaryTeal,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                if (isExpanded) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(faq.second, color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = Border)
+
+                Text("Need direct assistance? Chat live with EazyPay Support specialists or reach us via WhatsApp support groups.", color = TextSecondary, fontSize = 12.sp)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = onOpenChat,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal)
+                    ) {
+                        Text("Live Support Chat", color = Background, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+
+                    Button(
+                        onClick = { /* WhatsApp simulation */ },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Border),
+                        colors = ButtonDefaults.buttonColors(containerColor = Surface)
+                    ) {
+                        Text("WhatsApp Chat", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PrivacyPolicyModal(
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Privacy & Terms", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .heightIn(max = 240.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("1. Cryptographic Ledger Security", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("All offline payment transaction records generated on EazyPay terminals are sealed inside local databases using AES-256-GCM hardware keys. They are synchronized with Babcock centralized systems using authenticated TLS channels.", color = TextSecondary, fontSize = 12.sp)
+
+                    Text("2. Privacy Policies", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("EazyPay does not collect or track student physical location coordinates or background network activity. All logs represent authorized campus transaction fees.", color = TextSecondary, fontSize = 12.sp)
+
+                    Text("3. Babcock Compliance", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("By activating and linking your student physical ID or mobile tag sticker, you authorize Babcock University to settle off-line payments from your registered student e-wallet balance.", color = TextSecondary, fontSize = 12.sp)
+                }
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal)
+                ) {
+                    Text("Close", color = Background)
+                }
             }
         }
     }
