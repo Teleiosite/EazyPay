@@ -211,7 +211,8 @@ fun TransactionRow(
     amount: Double,
     isDebit: Boolean,
     timestamp: Long,
-    syncStatus: String
+    syncStatus: String,
+    onClick: () -> Unit = {}
 ) {
     val categoryIcon = when (category) {
         "food" -> "🍲"
@@ -233,7 +234,8 @@ fun TransactionRow(
         colors = CardDefaults.cardColors(containerColor = Surface),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 4.dp)
+            .clickable { onClick() },
         shape = RoundedCornerShape(12.dp)
     ) {
         Row(
@@ -419,6 +421,7 @@ fun PinKeypad(
 fun PinEntryModal(
     pinLength: Int,
     isError: Boolean,
+    attemptsRemaining: Int = 3,
     onChar: (Char) -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit
@@ -488,7 +491,7 @@ fun PinEntryModal(
                 if (isError) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Incorrect PIN! Please try again.",
+                        text = "Incorrect PIN! $attemptsRemaining attempts remaining.",
                         color = Danger,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold

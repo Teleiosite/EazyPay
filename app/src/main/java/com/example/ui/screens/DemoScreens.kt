@@ -45,6 +45,7 @@ fun DemoSplitScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Background)
+                    .statusBarsPadding()
                     .padding(16.dp)
             ) {
                 Row(

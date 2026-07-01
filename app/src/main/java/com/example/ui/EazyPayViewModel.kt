@@ -9,6 +9,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
+data class SupportChatMessage(
+    val sender: String, // "User" or "Agent"
+    val message: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 class EazyPayViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = EazyPayRepository(application)
 
@@ -49,6 +55,21 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
     private val _pinError = MutableStateFlow(false)
     val pinError: StateFlow<Boolean> = _pinError
 
+    // Production-Ready PIN attempts, lockouts, support chat and dispute states
+    private val _pinAttemptsRemaining = MutableStateFlow(3)
+    val pinAttemptsRemaining: StateFlow<Int> = _pinAttemptsRemaining
+
+    private val _isLockedOut = MutableStateFlow(false)
+    val isLockedOut: StateFlow<Boolean> = _isLockedOut
+
+    private val _disputedTransactions = MutableStateFlow<Set<Int>>(emptySet())
+    val disputedTransactions: StateFlow<Set<Int>> = _disputedTransactions
+
+    private val _chatMessages = MutableStateFlow<List<SupportChatMessage>>(listOf(
+        SupportChatMessage("Agent", "Hello! Welcome to EazyPay Babcock Support. How can we help you today?")
+    ))
+    val chatMessages: StateFlow<List<SupportChatMessage>> = _chatMessages
+
     private var demoJob: Job? = null
 
     fun setRole(role: String) {
@@ -81,6 +102,7 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun appendPinChar(char: Char, onPinComplete: () -> Unit) {
+        if (_isLockedOut.value) return
         if (_pinBuffer.value.length < 4) {
             _pinBuffer.value = _pinBuffer.value + char
             if (_pinBuffer.value.length == 4) {
@@ -90,8 +112,40 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun deletePinChar() {
+        if (_isLockedOut.value) return
         if (_pinBuffer.value.isNotEmpty()) {
             _pinBuffer.value = _pinBuffer.value.dropLast(1)
+        }
+    }
+
+    fun resetPinAttempts() {
+        _pinAttemptsRemaining.value = 3
+        _isLockedOut.value = false
+        _pinBuffer.value = ""
+    }
+
+    fun disputeTransaction(id: Int) {
+        _disputedTransactions.value = _disputedTransactions.value + id
+    }
+
+    fun sendChatMessage(msg: String) {
+        if (msg.isBlank()) return
+        viewModelScope.launch {
+            _chatMessages.value = _chatMessages.value + SupportChatMessage("User", msg)
+            delay(800)
+            val reply = when {
+                msg.contains("card", ignoreCase = true) || msg.contains("sticker", ignoreCase = true) -> 
+                    "You can link your EazyPay NFC card or sticker instantly at the Babcock IT Support booth or via any registered Student Union Agent device."
+                msg.contains("charge", ignoreCase = true) || msg.contains("withdraw", ignoreCase = true) -> 
+                    "Withdrawals are settled directly to your linked bank account (e.g. GTBank) within 24 hours. Contact our finance line if you experience any delay."
+                msg.contains("offline", ignoreCase = true) -> 
+                    "Yes! EazyPay uses advanced offline signed cryptographic ledger validation, ensuring payments execute securely with absolutely zero internet connectivity."
+                msg.contains("failed", ignoreCase = true) || msg.contains("dispute", ignoreCase = true) ->
+                    "We apologize for the inconvenience! Tap on any transaction in your History tab, select 'Dispute Transaction' and our administrative panel will review it."
+                else -> 
+                    "Thank you for contacting Babcock EazyPay Support. We have logged your request. One of our agents is reviewing your ticket and will respond shortly."
+            }
+            _chatMessages.value = _chatMessages.value + SupportChatMessage("Agent", reply)
         }
     }
 
@@ -99,10 +153,16 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             if (_pinBuffer.value == userPin.value) {
                 _pinError.value = false
+                _pinAttemptsRemaining.value = 3 // reset attempts
                 onPinComplete()
                 _pinBuffer.value = ""
             } else {
                 _pinError.value = true
+                val remaining = (_pinAttemptsRemaining.value - 1).coerceAtLeast(0)
+                _pinAttemptsRemaining.value = remaining
+                if (remaining == 0) {
+                    _isLockedOut.value = true
+                }
                 delay(800)
                 _pinBuffer.value = ""
                 _pinError.value = false

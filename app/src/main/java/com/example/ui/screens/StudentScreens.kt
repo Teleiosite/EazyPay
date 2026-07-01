@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -54,73 +55,16 @@ fun StudentMainScreen(
     Scaffold(
         containerColor = Background,
         topBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Background)
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            if (isOffline) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Background)
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(PrimaryTeal.copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Nfc,
-                                contentDescription = "Logo",
-                                tint = PrimaryTeal,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "EazyPay",
-                            color = TextPrimary,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        )
-                    }
-
-                    // Connection toggle button
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(100.dp))
-                            .background(if (isOffline) Warning.copy(alpha = 0.15f) else Success.copy(alpha = 0.15f))
-                            .border(
-                                1.dp,
-                                if (isOffline) Warning.copy(alpha = 0.3f) else Success.copy(alpha = 0.3f),
-                                RoundedCornerShape(100.dp)
-                            )
-                            .clickable { viewModel.toggleOffline() }
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(if (isOffline) Warning else Success)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isOffline) "Offline Mode" else "Online Sync",
-                            color = if (isOffline) Warning else Success,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    OfflineStatusBar(isOffline = isOffline, isSyncing = isSyncing)
                 }
-                Spacer(modifier = Modifier.height(6.dp))
-                OfflineStatusBar(isOffline = isOffline, isSyncing = isSyncing)
             }
         },
         bottomBar = {
@@ -209,24 +153,251 @@ fun StudentMainScreen(
                 )
             }
 
-            // Simple Support Dialog
+            // Full Support Hub Overlay
             if (showSupport) {
-                AlertDialog(
-                    onDismissRequest = { showSupport = false },
-                    containerColor = Surface,
-                    title = { Text("Contact Support", color = TextPrimary) },
-                    text = {
+                SupportHubModal(
+                    viewModel = viewModel,
+                    onDismiss = { showSupport = false }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SupportHubModal(
+    viewModel: EazyPayViewModel,
+    onDismiss: () -> Unit
+) {
+    var showChat by remember { mutableStateOf(false) }
+    var chatInput by remember { mutableStateOf("") }
+    val chatMessages by viewModel.chatMessages.collectAsState()
+    
+    val faqs = listOf(
+        "What is EazyPay offline mode?" to "EazyPay stores a signed cryptographic token issued at registration. Terminals can verify this token 100% offline using a preloaded public key, allowing you to pay with zero internet access.",
+        "How do I link an NFC card/sticker?" to "At the campus registration point, an EazyPay agent will tap your physical card/sticker on their administrator device. This instantly links the chip's unique serial number to your wallet account.",
+        "How do I dispute a transaction?" to "Go to the History tab, tap on any transaction to view its detailed receipt, and select 'Dispute Transaction' to flag it for administrator review."
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.85f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (showChat) "Support Live Chat" else "Babcock Support Hub",
+                        color = TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (!showChat) {
+                    // MAIN SUPPORT VIEW
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Quick Contact Cards
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = Surface),
+                                border = BorderStroke(1.dp, Border),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable { showChat = true }
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.Chat, contentDescription = "Live Chat", tint = PrimaryTeal, modifier = Modifier.size(24.dp))
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text("Live Chat", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("Simulated Agent", color = TextSecondary, fontSize = 11.sp)
+                                }
+                            }
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = Surface),
+                                border = BorderStroke(1.dp, Border),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.Call, contentDescription = "WhatsApp", tint = Success, modifier = Modifier.size(24.dp))
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text("WhatsApp", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("+234 800 EAZYPAY", color = TextSecondary, fontSize = 11.sp)
+                                }
+                            }
+                        }
+
+                        // FAQs Section
                         Text(
-                            "Have an issue or dispute? Reach out to EazyPay Customer Care via WhatsApp at +234 801 234 5678 or visit the IT Support block in Admin.",
-                            color = TextSecondary
+                            "CACHED OFFLINE FAQS",
+                            color = TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
                         )
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { showSupport = false }) {
-                            Text("Ok", color = PrimaryTeal)
+
+                        faqs.forEach { (q, a) ->
+                            var expanded by remember { mutableStateOf(false) }
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = Surface),
+                                border = BorderStroke(1.dp, Border),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { expanded = !expanded }
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(q, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                        Icon(
+                                            imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                            contentDescription = "Expand",
+                                            tint = TextSecondary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    if (expanded) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(a, color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+                                    }
+                                }
+                            }
                         }
                     }
-                )
+                } else {
+                    // LIVE CHAT SIMULATOR
+                    Column(modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .background(Surface, RoundedCornerShape(12.dp))
+                                .border(1.dp, Border, RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            val listState = rememberLazyListState()
+                            LaunchedEffect(chatMessages.size) {
+                                if (chatMessages.isNotEmpty()) {
+                                    listState.animateScrollToItem(chatMessages.size - 1)
+                                }
+                            }
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(chatMessages) { chat ->
+                                    val isUser = chat.sender == "User"
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(
+                                                    RoundedCornerShape(
+                                                        topStart = 12.dp,
+                                                        topEnd = 12.dp,
+                                                        bottomStart = if (isUser) 12.dp else 0.dp,
+                                                        bottomEnd = if (isUser) 0.dp else 12.dp
+                                                    )
+                                                )
+                                                .background(if (isUser) PrimaryTeal else Border)
+                                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                                .widthIn(max = 200.dp)
+                                        ) {
+                                            Text(
+                                                text = chat.message,
+                                                color = if (isUser) Background else TextPrimary,
+                                                fontSize = 12.sp,
+                                                lineHeight = 16.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = chatInput,
+                                onValueChange = { chatInput = it },
+                                placeholder = { Text("Ask Support...", color = TextMuted, fontSize = 13.sp) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedBorderColor = PrimaryTeal,
+                                    unfocusedBorderColor = Border,
+                                    focusedContainerColor = Surface,
+                                    unfocusedContainerColor = Surface
+                                )
+                            )
+                            IconButton(
+                                onClick = {
+                                    if (chatInput.isNotBlank()) {
+                                        viewModel.sendChatMessage(chatInput)
+                                        chatInput = ""
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(PrimaryTeal, RoundedCornerShape(12.dp))
+                            ) {
+                                Icon(Icons.Default.Send, contentDescription = "Send", tint = Background)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(onClick = { showChat = false }) {
+                            Text("← Back to Support Hub", color = PrimaryTeal, fontSize = 12.sp)
+                        }
+                    }
+                }
             }
         }
     }
@@ -243,6 +414,7 @@ fun StudentHomeScreen(
 ) {
     val studentUser by viewModel.student.collectAsState()
     val transactions by viewModel.transactions.collectAsState()
+    val isOffline by viewModel.isOffline.collectAsState()
     var isBalanceVisible by remember { mutableStateOf(true) }
 
     LazyColumn(
@@ -285,6 +457,55 @@ fun StudentHomeScreen(
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp
                     )
+                }
+            }
+        }
+
+        // Low Balance Warning Banner
+        if (studentUser.balance < 500.0) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Warning.copy(alpha = 0.12f)),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, Warning.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Warning.copy(alpha = 0.15f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Warning, contentDescription = "Warning", tint = Warning, modifier = Modifier.size(18.dp))
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Low Balance Alert",
+                                color = Warning,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Your wallet balance is below ₦500.00. Top up now to ensure uninterrupted offline payments.",
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp
+                            )
+                        }
+                        Button(
+                            onClick = onTopUpClick,
+                            colors = ButtonDefaults.buttonColors(containerColor = Warning),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text("Top Up", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
@@ -369,34 +590,69 @@ fun StudentHomeScreen(
 
                         Spacer(modifier = Modifier.height(20.dp))
 
-                        // Status footer: Ready for NFC Tap
+                        // Status footer: Ready for NFC Tap & Connection status
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Pulsing green dot
-                            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                            val alpha by infiniteTransition.animateFloat(
-                                initialValue = 0.3f,
-                                targetValue = 1.0f,
-                                animationSpec = infiniteRepeatable(
-                                    animation = tween(1000, easing = LinearEasing),
-                                    repeatMode = RepeatMode.Reverse
-                                ),
-                                label = "dotAlpha"
-                            )
-                            Box(
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // Pulsing green dot
+                                val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                                val alpha by infiniteTransition.animateFloat(
+                                    initialValue = 0.3f,
+                                    targetValue = 1.0f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(1000, easing = LinearEasing),
+                                        repeatMode = RepeatMode.Reverse
+                                    ),
+                                    label = "dotAlpha"
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(Success.copy(alpha = alpha))
+                                )
+                                Text(
+                                    text = "Ready for NFC Tap",
+                                    color = Success,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+
+                            // Connection toggle button inside Wallet Card
+                            Row(
                                 modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(Success.copy(alpha = alpha))
-                            )
-                            Text(
-                                text = "Ready for NFC Tap",
-                                color = Success,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                                    .clip(RoundedCornerShape(100.dp))
+                                    .background(if (isOffline) Warning.copy(alpha = 0.15f) else Success.copy(alpha = 0.15f))
+                                    .border(
+                                        1.dp,
+                                        if (isOffline) Warning.copy(alpha = 0.3f) else Success.copy(alpha = 0.3f),
+                                        RoundedCornerShape(100.dp)
+                                    )
+                                    .clickable { viewModel.toggleOffline() }
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isOffline) Warning else Success)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (isOffline) "Offline" else "Online Sync",
+                                    color = if (isOffline) Warning else Success,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
@@ -584,9 +840,12 @@ fun StudentPayScreen(
     val studentUser by viewModel.student.collectAsState()
     var isVerifyingPin by remember { mutableStateOf(false) }
     var showSuccess by remember { mutableStateOf(false) }
+    var showFailureReason by remember { mutableStateOf<String?>(null) }
     
     val pinLength by viewModel.pinBuffer.map { it.length }.collectAsState(0)
     val isPinError by viewModel.pinError.collectAsState()
+    val isLockedOut by viewModel.isLockedOut.collectAsState()
+    val pinAttemptsRemaining by viewModel.pinAttemptsRemaining.collectAsState()
 
     Box(
         modifier = Modifier
@@ -626,17 +885,27 @@ fun StudentPayScreen(
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
-                    .clickable { isVerifyingPin = true }
+                    .clickable {
+                        if (isLockedOut) {
+                            // Already locked out
+                        } else if (studentUser.balance < 10.0) {
+                            showFailureReason = "Your wallet balance is below the campus minimum balance of ₦10. Please top up your wallet to transact."
+                        } else if (studentUser.balance < 210.0) {
+                            showFailureReason = "Insufficient funds. The standard transaction amount requires ₦210 (including service fees)."
+                        } else {
+                            isVerifyingPin = true
+                        }
+                    }
                     .padding(vertical = 16.dp)
             ) {
                 NfcPulsingRing()
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "Tap here to simulate terminal contact",
-                    color = TextSecondary,
+                    text = if (isLockedOut) "🔐 Device Pin Locked" else "Tap here to simulate terminal contact",
+                    color = if (isLockedOut) Danger else TextSecondary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
-                    textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline
+                    textDecoration = if (isLockedOut) androidx.compose.ui.text.style.TextDecoration.None else androidx.compose.ui.text.style.TextDecoration.Underline
                 )
             }
 
@@ -677,10 +946,11 @@ fun StudentPayScreen(
         }
 
         // Shared PIN Entry Bottom Sheet overlay
-        if (isVerifyingPin) {
+        if (isVerifyingPin && !isLockedOut) {
             PinEntryModal(
                 pinLength = pinLength,
                 isError = isPinError,
+                attemptsRemaining = pinAttemptsRemaining,
                 onChar = { char ->
                     viewModel.appendPinChar(char) {
                         isVerifyingPin = false
@@ -706,6 +976,74 @@ fun StudentPayScreen(
                 onDismiss = { showSuccess = false }
             )
         }
+
+        // Cooldown Lockout Screen
+        if (isLockedOut) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Background)
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .background(Danger.copy(alpha = 0.15f), CircleShape)
+                            .border(2.dp, Danger, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = "Locked", tint = Danger, modifier = Modifier.size(40.dp))
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(
+                        text = "Security PIN Locked",
+                        color = TextPrimary,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "For security reasons, your EazyPay device has been frozen due to 3 consecutive wrong PIN entries. Cooldown active.",
+                        color = TextSecondary,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 20.sp
+                    )
+                    Spacer(modifier = Modifier.height(32.dp))
+                    Button(
+                        onClick = { viewModel.resetPinAttempts() },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Simulate Admin Bypass Unlock", color = Background, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Payment Failure Screen
+        showFailureReason?.let { reason ->
+            AlertDialog(
+                onDismissRequest = { showFailureReason = null },
+                containerColor = Surface,
+                title = { Text("Payment Blocked", color = Danger, fontWeight = FontWeight.Bold) },
+                text = { Text(reason, color = TextSecondary) },
+                confirmButton = {
+                    Button(
+                        onClick = { showFailureReason = null },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal)
+                    ) {
+                        Text("Okay", color = Background)
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -715,8 +1053,11 @@ fun StudentHistoryScreen(
     viewModel: EazyPayViewModel
 ) {
     val transactions by viewModel.transactions.collectAsState()
+    val disputedTransactions by viewModel.disputedTransactions.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("All") } // "All", "Paid", "Received", "Pending"
+    var selectedCategory by remember { mutableStateOf("All") } // "All", "Food", "Transport", "Print", "Topup"
+    var selectedTransaction by remember { mutableStateOf<com.example.data.TransactionEntity?>(null) }
 
     val filteredList = transactions.filter { tx ->
         // Search Filter
@@ -731,8 +1072,18 @@ fun StudentHistoryScreen(
             else -> true
         }
 
-        matchesSearch && matchesFilter
+        // Category Filter
+        val matchesCategory = if (selectedCategory == "All") true else tx.category.lowercase() == selectedCategory.lowercase()
+
+        matchesSearch && matchesFilter && matchesCategory
     }
+
+    // Analytics Calculation (e.g. Month Spend)
+    val paidTransactions = transactions.filter { it.isDebit && it.category != "topup" }
+    val totalSpend = paidTransactions.sumOf { it.amount }
+    val foodSpend = paidTransactions.filter { it.category == "food" }.sumOf { it.amount }
+    val transportSpend = paidTransactions.filter { it.category == "transport" }.sumOf { it.amount }
+    val printSpend = paidTransactions.filter { it.category == "print" }.sumOf { it.amount }
 
     Column(
         modifier = Modifier
@@ -766,12 +1117,70 @@ fun StudentHistoryScreen(
             singleLine = true
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-        // Filters horizontal row
+        // Spend breakdown mini card
+        if (transactions.isNotEmpty()) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Surface),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, Border),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("MONTHLY CASHLESS DISBURSEMENT", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Total: ₦${String.format("%,.2f", totalSpend)}",
+                            color = PrimaryTeal,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    
+                    // Segmented horizontal progress bar
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(CircleShape)
+                            .background(Border)
+                    ) {
+                        val scaleFactor = if (totalSpend > 0) 1.0 else 1.0
+                        val fWeight = if (totalSpend > 0) (foodSpend / totalSpend).toFloat().coerceAtLeast(0.05f) else 0.4f
+                        val tWeight = if (totalSpend > 0) (transportSpend / totalSpend).toFloat().coerceAtLeast(0.05f) else 0.3f
+                        val pWeight = if (totalSpend > 0) (printSpend / totalSpend).toFloat().coerceAtLeast(0.05f) else 0.3f
+                        
+                        Box(modifier = Modifier.weight(fWeight).fillMaxHeight().background(PrimaryTeal))
+                        Box(modifier = Modifier.weight(tWeight).fillMaxHeight().background(Warning))
+                        Box(modifier = Modifier.weight(pWeight).fillMaxHeight().background(Danger))
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    // Legend Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        LegendItem("Food (₦${String.format("%.0f", foodSpend)})", PrimaryTeal)
+                        LegendItem("Transport (₦${String.format("%.0f", transportSpend)})", Warning)
+                        LegendItem("Print (₦${String.format("%.0f", printSpend)})", Danger)
+                    }
+                }
+            }
+        }
+
+        // Status filters horizontal row
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             val filters = listOf("All", "Paid", "Received", "Pending")
             filters.forEach { filter ->
@@ -782,19 +1191,47 @@ fun StudentHistoryScreen(
                         .background(if (active) PrimaryTeal else Surface)
                         .border(1.dp, if (active) PrimaryTeal else Border, RoundedCornerShape(100.dp))
                         .clickable { selectedFilter = filter }
-                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
                         text = filter,
                         color = if (active) Background else TextPrimary,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Category filters horizontal row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            val categories = listOf("All", "Food", "Transport", "Print", "Topup")
+            categories.forEach { cat ->
+                val active = selectedCategory == cat
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(100.dp))
+                        .background(if (active) Warning else Surface)
+                        .border(1.dp, if (active) Warning else Border, RoundedCornerShape(100.dp))
+                        .clickable { selectedCategory = cat }
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        text = if (cat == "Topup") "Top-Up" else cat,
+                        color = if (active) Color.Black else TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Transaction List
         if (filteredList.isEmpty()) {
@@ -830,11 +1267,191 @@ fun StudentHistoryScreen(
                         amount = tx.amount,
                         isDebit = tx.isDebit,
                         timestamp = tx.timestamp,
-                        syncStatus = tx.syncStatus
+                        syncStatus = tx.syncStatus,
+                        onClick = { selectedTransaction = tx }
                     )
                 }
             }
         }
+    }
+
+    // Receipt details drawer / modal
+    selectedTransaction?.let { tx ->
+        TransactionReceiptModal(
+            tx = tx,
+            isDisputed = disputedTransactions.contains(tx.id),
+            onDispute = { viewModel.disputeTransaction(tx.id) },
+            onDismiss = { selectedTransaction = null }
+        )
+    }
+}
+
+@Composable
+fun LegendItem(label: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(color))
+        Text(label, color = TextSecondary, fontSize = 10.sp)
+    }
+}
+
+@Composable
+fun TransactionReceiptModal(
+    tx: com.example.data.TransactionEntity,
+    isDisputed: Boolean,
+    onDispute: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val isDebit = tx.isDebit
+    val amountColor = if (isDebit) Danger else Success
+    val prefix = if (isDebit) "-₦" else "+₦"
+    var showShareMessage by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.88f)
+                .border(1.dp, Border, RoundedCornerShape(24.dp))
+                .clickable(enabled = false) {},
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Ticket head
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Transaction Receipt", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = TextSecondary,
+                        modifier = Modifier.clickable { onDismiss() }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Icon
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(PrimaryTeal.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.ReceiptLong, contentDescription = "Receipt", tint = PrimaryTeal, modifier = Modifier.size(28.dp))
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Amount
+                Text(
+                    text = "$prefix${String.format("%,.2f", tx.amount)}",
+                    color = amountColor,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(tx.title, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = if (isDisputed) "⚠️ FLAG DISPUTED" else "Verified Offline ✓",
+                    color = if (isDisputed) Warning else TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Info details
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ReceiptDetailRow("Transaction ID", "TXN-${tx.timestamp / 10000}")
+                    ReceiptDetailRow("Timestamp", java.text.SimpleDateFormat("MMM dd, yyyy - hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(tx.timestamp)))
+                    ReceiptDetailRow("Category", tx.category.replaceFirstChar { it.uppercase() })
+                    ReceiptDetailRow("Security Standard", "AES-256 GCM Signed Ledger")
+                    ReceiptDetailRow("Status", tx.syncStatus)
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Actions
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            onDispute()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isDisputed) Danger.copy(alpha = 0.15f) else Warning.copy(alpha = 0.15f)
+                        ),
+                        border = BorderStroke(1.dp, if (isDisputed) Danger else Warning),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        enabled = !isDisputed
+                    ) {
+                        Text(
+                            text = if (isDisputed) "Disputed" else "Dispute",
+                            color = if (isDisputed) Danger else Warning,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+
+                    Button(
+                        onClick = { showShareMessage = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                        modifier = Modifier
+                            .weight(1.2f)
+                            .height(48.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Share Receipt", color = Background, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                }
+
+                if (showShareMessage) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "Receipt cryptographic link copied to clipboard!",
+                        color = Success,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ReceiptDetailRow(label: String, valStr: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, color = TextSecondary, fontSize = 12.sp)
+        Text(valStr, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

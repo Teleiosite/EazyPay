@@ -49,6 +49,7 @@ fun VendorMainScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Background)
+                    .statusBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Row(
@@ -71,14 +72,6 @@ fun VendorMainScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "EazyPay Terminal",
-                            color = TextPrimary,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        )
                     }
 
                     // Connection toggle button
@@ -443,6 +436,7 @@ fun VendorTerminalScreen(
     val terminalState by viewModel.terminalState.collectAsState()
     val terminalAmount by viewModel.terminalAmount.collectAsState()
     val terminalStudent by viewModel.terminalStudent.collectAsState()
+    var isNfcAntennaOn by remember { mutableStateOf(true) }
     
     val pinLength by viewModel.pinBuffer.map { it.length }.collectAsState(0)
     val isPinError by viewModel.pinError.collectAsState()
@@ -474,44 +468,112 @@ fun VendorTerminalScreen(
             1 -> {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.clickable { viewModel.triggerTerminalScan() }
+                    modifier = Modifier.padding(vertical = 8.dp)
                 ) {
-                    NfcPulsingRing(isListening = true)
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Text(
-                        text = "Waiting for payment tap...",
-                        color = TextPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Tap here to simulate Student card contact",
-                        color = PrimaryTeal,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
+                    if (isNfcAntennaOn) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.clickable { viewModel.triggerTerminalScan() }
+                        ) {
+                            NfcPulsingRing(isListening = true)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Waiting for payment tap...",
+                                color = TextPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Tap here to simulate Student card contact",
+                                color = PrimaryTeal,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(120.dp)
+                                .background(Border, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Nfc, contentDescription = "Off", tint = TextSecondary, modifier = Modifier.size(48.dp))
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "NFC Receiver Antenna Off",
+                            color = Danger,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Enable terminal antenna below to scan cards",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
                 
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Surface),
-                    border = BorderStroke(1.dp, Border),
-                    modifier = Modifier.fillMaxWidth()
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "Terminal status: Always active",
-                            color = Success,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
-                        Text(
-                            text = "Students can tap sticker or phone to authorize payments",
-                            color = TextSecondary,
-                            fontSize = 11.sp,
-                            textAlign = TextAlign.Center
-                        )
+                    // Antenna toggle row
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Surface),
+                        border = BorderStroke(1.dp, Border),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Default.SettingsInputAntenna, contentDescription = "NFC", tint = if (isNfcAntennaOn) Success else TextSecondary)
+                                Column {
+                                    Text("NFC Hardware Antenna", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text(if (isNfcAntennaOn) "Simulating active EMV polling" else "Transceiver hardware asleep", color = TextSecondary, fontSize = 11.sp)
+                                }
+                            }
+                            Switch(
+                                checked = isNfcAntennaOn,
+                                onCheckedChange = { isNfcAntennaOn = it },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Background,
+                                    checkedTrackColor = PrimaryTeal
+                                )
+                            )
+                        }
+                    }
+
+                    // Secure terminal Compliance Card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Surface),
+                        border = BorderStroke(1.dp, Border),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Default.Lock, contentDescription = "Secure", tint = Success, modifier = Modifier.size(14.dp))
+                                Text(
+                                    text = "EMV SECURE CONTACTLESS V3 ACTIVE",
+                                    color = Success,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "This device complies with campus offline protocol requirements. Cryptographic signatures verify balances without internet.",
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
             }
@@ -703,11 +765,18 @@ fun VendorEarningsScreen(
     viewModel: EazyPayViewModel
 ) {
     val transactions by viewModel.transactions.collectAsState()
-    var period by remember { mutableStateOf("Today") } // "Today", "Week", "Month"
+    var period by remember { mutableStateOf("This Week") } // "Today", "This Week", "This Month"
+    var selectedTransaction by remember { mutableStateOf<com.example.data.TransactionEntity?>(null) }
 
     val filteredList = transactions.filter { !it.isDebit } // Vendor only gets received earnings
 
     val totalAmount = filteredList.sumOf { it.amount }
+    val syncedAmount = filteredList.filter { it.syncStatus == "Synced" }.sumOf { it.amount }
+    val pendingAmount = filteredList.filter { it.syncStatus == "Pending" }.sumOf { it.amount }
+
+    // Average calculations
+    val avgTicket = if (filteredList.isNotEmpty()) totalAmount / filteredList.size else 350.00
+    val totalPaymentsCount = filteredList.size + 14
 
     LazyColumn(
         modifier = Modifier
@@ -766,15 +835,114 @@ fun VendorEarningsScreen(
                     Column {
                         Text("TOTAL AMOUNT EARNED", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         Text(
-                            "₦${String.format("%,.2f", totalAmount + 2100.0)}", // add seed earnings
+                            "₦${String.format("%,.2f", totalAmount + 14850.00)}", // add seed earnings
                             color = TextPrimary,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("SETTLED SUCCESS", color = Success, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text("${filteredList.size + 10} payments", color = TextSecondary, fontSize = 13.sp)
+                        Text("TOTAL VOLUMES", color = PrimaryTeal, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("$totalPaymentsCount transactions", color = TextSecondary, fontSize = 13.sp)
+                    }
+                }
+            }
+        }
+
+        // Settlement Sync Tracker Card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Surface),
+                border = BorderStroke(1.dp, Border),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "OFFLINE SETTLEMENT TRACKER",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Synced Bank settlement
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Background),
+                            border = BorderStroke(1.dp, Border),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Success))
+                                    Text("Settled to Bank", color = TextSecondary, fontSize = 11.sp)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("₦${String.format("%,.2f", syncedAmount + 14850.00)}", color = Success, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        // Pending settlement (offline)
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Background),
+                            border = BorderStroke(1.dp, Border),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Warning))
+                                    Text("Pending Sync", color = TextSecondary, fontSize = 11.sp)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("₦${String.format("%,.2f", pendingAmount)}", color = Warning, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "ℹ️ Offline collections are stored cryptographically on the terminal and processed automatically to your linked account once connection is restored.",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+        }
+
+        // Terminal Averages & Peaks Card
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Surface),
+                border = BorderStroke(1.dp, Border),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("PERFORMANCE METRICS", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("Avg. Ticket Value", color = TextSecondary, fontSize = 11.sp)
+                            Text("₦${String.format("%.2f", avgTicket)}", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Busiest Rush Hour", color = TextSecondary, fontSize = 11.sp)
+                            Text("12:15 PM - 1:45 PM", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Peak Category", color = TextSecondary, fontSize = 11.sp)
+                            Text("🍛 Lunch Meals", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -798,7 +966,7 @@ fun VendorEarningsScreen(
 
         item {
             Text(
-                text = "Earnings Log",
+                text = "Terminal Collections Log",
                 color = TextPrimary,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
@@ -823,8 +991,118 @@ fun VendorEarningsScreen(
                     amount = tx.amount,
                     isDebit = tx.isDebit,
                     timestamp = tx.timestamp,
-                    syncStatus = tx.syncStatus
+                    syncStatus = tx.syncStatus,
+                    onClick = { selectedTransaction = tx }
                 )
+            }
+        }
+    }
+
+    // Settlement Receipt Details Modal
+    selectedTransaction?.let { tx ->
+        VendorSettlementReceiptModal(
+            tx = tx,
+            onDismiss = { selectedTransaction = null }
+        )
+    }
+}
+
+@Composable
+fun VendorSettlementReceiptModal(
+    tx: com.example.data.TransactionEntity,
+    onDismiss: () -> Unit
+) {
+    val syncLabel = if (tx.syncStatus == "Synced") "Settled to Bank ✓" else "Offline Logged 📶"
+    val syncColor = if (tx.syncStatus == "Synced") Success else Warning
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.88f)
+                .border(1.dp, Border, RoundedCornerShape(24.dp))
+                .clickable(enabled = false) {},
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Collection Receipt", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = TextSecondary,
+                        modifier = Modifier.clickable { onDismiss() }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(PrimaryTeal.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.ReceiptLong, contentDescription = "Receipt", tint = PrimaryTeal, modifier = Modifier.size(28.dp))
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "₦${String.format("%,.2f", tx.amount)}",
+                    color = Success,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(tx.title, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = syncLabel,
+                    color = syncColor,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    ReceiptDetailRow("Crypto Signature", "ECDSA-secp256k1 Signed")
+                    ReceiptDetailRow("Linked Device", "NFC SECURE-CHIP-V3")
+                    ReceiptDetailRow("Collection Time", java.text.SimpleDateFormat("MMM dd, yyyy - hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(tx.timestamp)))
+                    ReceiptDetailRow("Campus Station", "Babcock Cafeteria A")
+                    ReceiptDetailRow("Settlement Target", "Wema Bank (012****905)")
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Dismiss", color = Background, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
