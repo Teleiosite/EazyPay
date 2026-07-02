@@ -174,6 +174,18 @@ class EazyPayRepository(context: Context) {
             .apply()
     }
 
+    fun updateVendorBankDetails(bankName: String, accountNumber: String) {
+        val updated = _vendor.value.copy(
+            bankName = bankName,
+            accountNumber = accountNumber
+        )
+        _vendor.value = updated
+        prefs.edit()
+            .putString("vendor_bank", bankName)
+            .putString("vendor_account", accountNumber)
+            .apply()
+    }
+
     fun setRole(role: String) {
         _currentRole.value = role
         prefs.edit().putString("current_role", role).apply()

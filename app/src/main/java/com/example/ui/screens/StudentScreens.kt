@@ -1564,7 +1564,7 @@ fun StudentProfileScreen(
 
                 val settings = listOf(
                     Pair("Personal details", Icons.Outlined.Person),
-                    Pair("Registered NFC cards", Icons.Outlined.Nfc),
+                    Pair("Registered NFT cards", Icons.Outlined.Nfc),
                     Pair("Biometrics lock", Icons.Outlined.Fingerprint),
                     Pair("Change security PIN", Icons.Outlined.Lock),
                     Pair("Help Center & FAQ", Icons.Outlined.HelpOutline),
@@ -1579,7 +1579,7 @@ fun StudentProfileScreen(
                             .clickable {
                                 activeModal = when (item.first) {
                                     "Personal details" -> "personal"
-                                    "Registered NFC cards" -> "nfc"
+                                    "Registered NFC cards", "Registered NFT cards" -> "nfc"
                                     "Biometrics lock" -> "biometrics"
                                     "Change security PIN" -> "pin"
                                     "Help Center & FAQ" -> "help"
@@ -2426,21 +2426,88 @@ fun TopUpModal(
     viewModel: EazyPayViewModel,
     onDismiss: () -> Unit
 ) {
+    val studentUser by viewModel.student.collectAsState()
+    val clipboardManager = LocalClipboardManager.current
+    val coroutineScope = rememberCoroutineScope()
+
+    var step by remember { mutableStateOf(1) } // 1: Enter Amount, 2: Gateway/Transfer, 3: Card OTP, 4: Success
+    var paymentMethod by remember { mutableStateOf("card") } // "card" or "bank"
     var amountText by remember { mutableStateOf("") }
     val quickAmounts = listOf("500", "1000", "2000", "5000")
-    val clipboardManager = LocalClipboardManager.current
+
+    // Card Details States
+    var cardNumber by remember { mutableStateOf("") }
+    var cardExpiry by remember { mutableStateOf("") }
+    var cardCvv by remember { mutableStateOf("") }
+    var cardPin by remember { mutableStateOf("") }
+    var cardholderName by remember { mutableStateOf(studentUser.name) }
+    var isProcessingPayment by remember { mutableStateOf(false) }
+
+    // OTP States
+    var otpCode by remember { mutableStateOf("") }
+    var otpCountdown by remember { mutableStateOf(59) }
+    var otpError by remember { mutableStateOf(false) }
+
+    // Bank Transfer States
+    var isCheckingTransfer by remember { mutableStateOf(false) }
+    var transferReceived by remember { mutableStateOf(false) }
+
+    // Success state details
+    var transactionRef by remember { mutableStateOf("") }
+
+    // Helper functions for formatting
+    fun detectCardBrand(num: String): String {
+        val clean = num.replace(" ", "")
+        return when {
+            clean.startsWith("4") -> "Visa"
+            clean.startsWith("5") || (clean.length >= 2 && clean.substring(0, 2).toIntOrNull() in 51..55) -> "Mastercard"
+            clean.startsWith("506") || clean.startsWith("5078") || clean.startsWith("650") -> "Verve"
+            else -> "Unknown"
+        }
+    }
+
+    fun formatCardNumber(num: String): String {
+        val clean = num.replace(" ", "").take(16)
+        val sb = StringBuilder()
+        for (i in clean.indices) {
+            sb.append(clean[i])
+            if ((i + 1) % 4 == 0 && i < clean.lastIndex) {
+                sb.append(" ")
+            }
+        }
+        return sb.toString()
+    }
+
+    fun formatExpiry(exp: String): String {
+        val clean = exp.replace("/", "").take(4)
+        return when {
+            clean.length >= 3 -> "${clean.substring(0, 2)}/${clean.substring(2)}"
+            else -> clean
+        }
+    }
+
+    // OTP countdown timer
+    LaunchedEffect(step) {
+        if (step == 3) {
+            otpCountdown = 59
+            while (otpCountdown > 0) {
+                delay(1000)
+                otpCountdown--
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.8f))
-            .clickable { onDismiss() },
+            .background(Color.Black.copy(alpha = 0.85f))
+            .clickable { if (!isProcessingPayment && !isCheckingTransfer && step != 4) onDismiss() },
         contentAlignment = Alignment.Center
     ) {
         Card(
             colors = CardDefaults.cardColors(containerColor = Background),
             modifier = Modifier
-                .fillMaxWidth(0.9f)
+                .fillMaxWidth(0.92f)
                 .clickable(enabled = false) {}
                 .border(1.dp, Border, RoundedCornerShape(24.dp)),
             shape = RoundedCornerShape(24.dp)
@@ -2450,118 +2517,726 @@ fun TopUpModal(
                     .fillMaxWidth()
                     .padding(24.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Top-Up Wallet", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = TextSecondary,
-                        modifier = Modifier.clickable { onDismiss() }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Mock Bank Transfer Instructions
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = Surface),
-                    border = BorderStroke(1.dp, Border),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text("MOCK BANK TRANSFER TO LOAD FUNDS", color = PrimaryTeal, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text("Bank: Access Bank PLC (EazyPay)", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Account: 0148500047", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                // Header (No close button if processing)
+                if (step != 4) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (step == 1) Icons.Default.AddCard else Icons.Default.ArrowBack,
+                                contentDescription = "Back",
+                                tint = PrimaryTeal,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clickable {
+                                        if (!isProcessingPayment && !isCheckingTransfer) {
+                                            if (step > 1) step-- else onDismiss()
+                                        }
+                                    }
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
                             Text(
-                                "Copy",
-                                color = PrimaryTeal,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.clickable { clipboardManager.setText(AnnotatedString("0148500047")) }
+                                text = when (step) {
+                                    1 -> "Top-Up Wallet"
+                                    2 -> if (paymentMethod == "card") "Secure Card Checkout" else "Dynamic Bank Transfer"
+                                    3 -> "Secure OTP Verification"
+                                    else -> "Top-up Wallet"
+                                },
+                                color = TextPrimary,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (!isProcessingPayment && !isCheckingTransfer) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = TextSecondary,
+                                modifier = Modifier.clickable { onDismiss() }
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                // STEP 1: Enter Amount & Select Payment Mode
+                if (step == 1) {
+                    Text("ENTER TOP-UP AMOUNT", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = amountText,
+                        onValueChange = { amountText = it.filter { char -> char.isDigit() } },
+                        prefix = { Text("₦", color = TextPrimary, fontWeight = FontWeight.Bold) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryTeal,
+                            unfocusedBorderColor = Border,
+                            focusedContainerColor = Surface,
+                            unfocusedContainerColor = Surface
+                        ),
+                        singleLine = true,
+                        placeholder = { Text("Min: ₦100", color = TextSecondary) }
+                    )
 
-                // Custom amount field
-                Text("ENTER AMOUNT", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = amountText,
-                    onValueChange = { amountText = it },
-                    prefix = { Text("₦", color = TextPrimary, fontWeight = FontWeight.Bold) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextPrimary,
-                        unfocusedTextColor = TextPrimary,
-                        focusedBorderColor = PrimaryTeal,
-                        unfocusedBorderColor = Border,
-                        focusedContainerColor = Surface,
-                        unfocusedContainerColor = Surface
-                    ),
-                    singleLine = true
-                )
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    // Quick Amounts Chips
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        quickAmounts.forEach { amt ->
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (amountText == amt) PrimaryTeal.copy(alpha = 0.15f) else Surface)
+                                    .border(
+                                        1.dp,
+                                        if (amountText == amt) PrimaryTeal else Border,
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { amountText = amt }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("₦$amt", color = if (amountText == amt) PrimaryTeal else TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
 
-                // Chips row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    quickAmounts.forEach { amount ->
-                        Box(
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Text("SELECT PAYMENT METHOD", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Payment Method Options
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Card Option
+                        Row(
                             modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Surface)
-                                .border(1.dp, Border, RoundedCornerShape(8.dp))
-                                .clickable { amountText = amount }
-                                .padding(vertical = 10.dp),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (paymentMethod == "card") Surface else Color.Transparent)
+                                .border(
+                                    1.dp,
+                                    if (paymentMethod == "card") PrimaryTeal else Border,
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .clickable { paymentMethod = "card" }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("₦$amount", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(PrimaryTeal.copy(alpha = 0.1f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.CreditCard, contentDescription = "Card", tint = PrimaryTeal, modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Card Payment", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("Pay securely with Visa, Mastercard, or Verve", color = TextSecondary, fontSize = 11.sp)
+                            }
+                            RadioButton(
+                                selected = paymentMethod == "card",
+                                onClick = { paymentMethod = "card" },
+                                colors = RadioButtonDefaults.colors(selectedColor = PrimaryTeal)
+                            )
+                        }
+
+                        // Bank Transfer Option
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (paymentMethod == "bank") Surface else Color.Transparent)
+                                .border(
+                                    1.dp,
+                                    if (paymentMethod == "bank") PrimaryTeal else Border,
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .clickable { paymentMethod = "bank" }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(PrimaryTeal.copy(alpha = 0.1f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.AccountBalance, contentDescription = "Bank", tint = PrimaryTeal, modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Instant Bank Transfer", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("Generate a unique virtual account to transfer Naira", color = TextSecondary, fontSize = 11.sp)
+                            }
+                            RadioButton(
+                                selected = paymentMethod == "bank",
+                                onClick = { paymentMethod = "bank" },
+                                colors = RadioButtonDefaults.colors(selectedColor = PrimaryTeal)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    val finalAmount = amountText.toDoubleOrNull() ?: 0.0
+                    Button(
+                        onClick = {
+                            if (finalAmount >= 100.0) {
+                                step = 2
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                        enabled = finalAmount >= 100.0
+                    ) {
+                        Text(
+                            text = if (paymentMethod == "card") "Proceed to Paystack Card Gateway" else "Generate Virtual Account",
+                            color = Background,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // STEP 2A: Paystack Card Gateway Form
+                else if (step == 2 && paymentMethod == "card") {
+                    val finalAmount = amountText.toDoubleOrNull() ?: 0.0
+                    
+                    Text("SECURE GATEWAY CHECKOUT", color = PrimaryTeal, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Amount to Pay: ₦${String.format("%,.2f", finalAmount)}", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Card Number Field
+                    Text("CARD NUMBER", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = cardNumber,
+                        onValueChange = {
+                            val clean = it.replace(" ", "").filter { char -> char.isDigit() }
+                            if (clean.length <= 16) {
+                                cardNumber = formatCardNumber(it)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        placeholder = { Text("0000 0000 0000 0000", color = TextSecondary) },
+                        trailingIcon = {
+                            val brand = detectCardBrand(cardNumber)
+                            if (brand != "Unknown") {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(PrimaryTeal.copy(alpha = 0.15f))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(brand, color = PrimaryTeal, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Icon(Icons.Default.CreditCard, contentDescription = "Card", tint = TextSecondary)
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryTeal,
+                            unfocusedBorderColor = Border,
+                            focusedContainerColor = Surface,
+                            unfocusedContainerColor = Surface
+                        ),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Expiry and CVV Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("EXPIRY DATE", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedTextField(
+                                value = cardExpiry,
+                                onValueChange = {
+                                    val clean = it.replace("/", "").filter { char -> char.isDigit() }
+                                    if (clean.length <= 4) {
+                                        cardExpiry = formatExpiry(it)
+                                    }
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                placeholder = { Text("MM/YY", color = TextSecondary) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedBorderColor = PrimaryTeal,
+                                    unfocusedBorderColor = Border,
+                                    focusedContainerColor = Surface,
+                                    unfocusedContainerColor = Surface
+                                ),
+                                singleLine = true
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("CVV SECURITY CODE", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            OutlinedTextField(
+                                value = cardCvv,
+                                onValueChange = {
+                                    val clean = it.filter { char -> char.isDigit() }
+                                    if (clean.length <= 3) {
+                                        cardCvv = clean
+                                    }
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                placeholder = { Text("123", color = TextSecondary) },
+                                visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
+                                    focusedBorderColor = PrimaryTeal,
+                                    unfocusedBorderColor = Border,
+                                    focusedContainerColor = Surface,
+                                    unfocusedContainerColor = Surface
+                                ),
+                                singleLine = true
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Card PIN
+                    Text("CARD 4-DIGIT PIN", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = cardPin,
+                        onValueChange = {
+                            val clean = it.filter { char -> char.isDigit() }
+                            if (clean.length <= 4) {
+                                cardPin = clean
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        placeholder = { Text("Enter Card ATM PIN", color = TextSecondary) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryTeal,
+                            unfocusedBorderColor = Border,
+                            focusedContainerColor = Surface,
+                            unfocusedContainerColor = Surface
+                        ),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Paystack Badge
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Lock, contentDescription = "Secure", tint = Success, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Secured by Paystack | PCIDSS Level 1 Certified Gateway", color = TextSecondary, fontSize = 10.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    val isCardValid = cardNumber.replace(" ", "").length == 16 &&
+                            cardExpiry.length == 5 &&
+                            cardCvv.length == 3 &&
+                            cardPin.length == 4
+
+                    Button(
+                        onClick = {
+                            isProcessingPayment = true
+                            coroutineScope.launch {
+                                delay(1800) // Simulate gateway initialization
+                                isProcessingPayment = false
+                                step = 3 // Move to OTP
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                        enabled = isCardValid && !isProcessingPayment
+                    ) {
+                        if (isProcessingPayment) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Background, strokeWidth = 2.dp)
+                        } else {
+                            Text("Pay ₦${String.format("%,.2f", finalAmount)} Securely", color = Background, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                // STEP 2B: Instant Virtual Bank Transfer details
+                else if (step == 2 && paymentMethod == "bank") {
+                    val finalAmount = amountText.toDoubleOrNull() ?: 0.0
+                    val phoneClean = studentUser.phone.replace("+234", "").replace(" ", "").trim()
+                    val virtualAccount = "992" + phoneClean.takeLast(7) // Moniepoint routing prefix + phone suffix
 
-                Button(
-                    onClick = {
-                        val amount = amountText.toDoubleOrNull() ?: 0.0
-                        if (amount > 0) {
-                            viewModel.topUpWallet(amount)
-                            onDismiss()
+                    Text("INSTANT NIRE WEB BANK TRANSFER", color = PrimaryTeal, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Please transfer ₦${String.format("%,.2f", finalAmount)} to your unique Babcock-EazyPay virtual settlement account:", color = TextSecondary, fontSize = 12.sp)
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Account Container card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Surface),
+                        border = BorderStroke(1.dp, Border),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("SETTLEMENT INSTITUTION", color = PrimaryTeal, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("Moniepoint Microfinance Bank", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Text("ACCOUNT HOLDER", color = PrimaryTeal, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            Text("EazyPay Babcock - ${studentUser.name}", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text("VIRTUAL ACCOUNT NUMBER", color = PrimaryTeal, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    Text(virtualAccount, color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(PrimaryTeal.copy(alpha = 0.15f))
+                                        .clickable {
+                                            clipboardManager.setText(AnnotatedString(virtualAccount))
+                                        }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text("Copy", color = PrimaryTeal, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
-                    enabled = amountText.isNotBlank()
-                ) {
-                    Text("I've made the transfer", color = Background, fontWeight = FontWeight.Bold)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // USSD code helper for quick campus bank transfers
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Surface),
+                        border = BorderStroke(1.dp, Border),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.PhoneAndroid, contentDescription = "USSD", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Or Dial USSD Transfer Code: *402*${virtualAccount}*${amountText}#",
+                                color = TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Active monitoring loader
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        val infiniteTransition = rememberInfiniteTransition()
+                        val alpha by infiniteTransition.animateFloat(
+                            initialValue = 0.3f,
+                            targetValue = 1f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(1000, easing = LinearEasing),
+                                repeatMode = RepeatMode.Reverse
+                            )
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(Success.copy(alpha = alpha))
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "Listening for real-time local credit notification...",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Button(
+                        onClick = {
+                            isCheckingTransfer = true
+                            coroutineScope.launch {
+                                delay(2200) // Mock lookup querying central ledger logs
+                                isCheckingTransfer = false
+                                transactionRef = "EP-TX-BNK" + (100000..999999).random()
+                                viewModel.topUpWallet(finalAmount)
+                                step = 4 // Success Screen!
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                        enabled = !isCheckingTransfer
+                    ) {
+                        if (isCheckingTransfer) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Background, strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Checking NIP Settle Ledger...", color = Background, fontSize = 14.sp)
+                            }
+                        } else {
+                            Text("Verify Bank Deposit Status", color = Background, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // STEP 3: OTP Code Entry Panel (Card Payment Mode)
+                else if (step == 3) {
+                    val finalAmount = amountText.toDoubleOrNull() ?: 0.0
+                    Text("3D SECURE OTP AUTHORIZATION", color = PrimaryTeal, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("We've simulated sending a 6-digit verification OTP to registration number ${studentUser.phone.take(6)}···${studentUser.phone.takeLast(4)}", color = TextSecondary, fontSize = 12.sp)
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    OutlinedTextField(
+                        value = otpCode,
+                        onValueChange = {
+                            if (it.filter { char -> char.isDigit() }.length <= 6) {
+                                otpCode = it.filter { char -> char.isDigit() }
+                                otpError = false
+                            }
+                        },
+                        label = { Text("Enter 6-Digit OTP") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = if (otpError) Warning else PrimaryTeal,
+                            unfocusedBorderColor = if (otpError) Warning else Border,
+                            focusedContainerColor = Surface,
+                            unfocusedContainerColor = Surface
+                        ),
+                        singleLine = true,
+                        placeholder = { Text("e.g. 123456 (Use 123456 to verify)", color = TextSecondary) }
+                    )
+
+                    if (otpError) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("Incorrect OTP entered. Enter code 123456 for test authorization.", color = Warning, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Countdown indicator
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (otpCountdown > 0) "Resend SMS code in ${otpCountdown}s" else "Didn't receive SMS?",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                        if (otpCountdown == 0) {
+                            Text(
+                                "Resend OTP",
+                                color = PrimaryTeal,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable {
+                                    otpCountdown = 59
+                                    otpCode = ""
+                                }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(28.dp))
+
+                    Button(
+                        onClick = {
+                            if (otpCode == "123456" || otpCode.length == 6) {
+                                isProcessingPayment = true
+                                coroutineScope.launch {
+                                    delay(2000) // Authenticating with Bank 3D Secure
+                                    isProcessingPayment = false
+                                    transactionRef = "EP-TX-CRD" + (100000..999999).random()
+                                    viewModel.topUpWallet(finalAmount)
+                                    step = 4 // Success Screen!
+                                }
+                            } else {
+                                otpError = true
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                        enabled = otpCode.length == 6 && !isProcessingPayment
+                    ) {
+                        if (isProcessingPayment) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Background, strokeWidth = 2.dp)
+                        } else {
+                            Text("Verify & Complete Top-Up", color = Background, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // STEP 4: Beautiful Checkout Success Screen
+                else if (step == 4) {
+                    val finalAmount = amountText.toDoubleOrNull() ?: 0.0
+                    
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        // Animated pulsing success tick
+                        Box(
+                            modifier = Modifier
+                                .size(84.dp)
+                                .clip(CircleShape)
+                                .background(Success.copy(alpha = 0.15f))
+                                .border(2.dp, Success, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = "Success", tint = Success, modifier = Modifier.size(48.dp))
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        Text("Top-Up Successful!", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("Funds loaded securely into your offline ledger balance", color = TextSecondary, fontSize = 12.sp, textAlign = TextAlign.Center)
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        // Transaction details ticket
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Surface),
+                            border = BorderStroke(1.dp, Border),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("CREDITED AMOUNT", color = TextSecondary, fontSize = 11.sp)
+                                    Text("₦${String.format("%,.2f", finalAmount)}", color = Success, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Divider(color = Border.copy(alpha = 0.5f))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("TRANSACTION REFERENCE", color = TextSecondary, fontSize = 11.sp)
+                                    Text(transactionRef, color = TextPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+                                }
+                                Divider(color = Border.copy(alpha = 0.5f))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("GATEWAY CHANNEL", color = TextSecondary, fontSize = 11.sp)
+                                    Text(if (paymentMethod == "card") "Paystack (Card)" else "NIP Instant Direct", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                Divider(color = Border.copy(alpha = 0.5f))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("LEDGER SYNC STATUS", color = TextSecondary, fontSize = 11.sp)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(Success))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Signed Offline Ledger", color = Success, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(28.dp))
+
+                        Button(
+                            onClick = { onDismiss() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal)
+                        ) {
+                            Text("Close", color = Background, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         }
     }
 }
+
 
 // 6. PAYMENT SUCCESS FULLSCREEN SCREEN/OVERLAY
 @Composable

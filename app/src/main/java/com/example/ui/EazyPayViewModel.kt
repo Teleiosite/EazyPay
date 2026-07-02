@@ -101,6 +101,10 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
         repository.updateStudentDetails(name, email, phone, department, level)
     }
 
+    fun updateVendorBankDetails(bankName: String, accountNumber: String) {
+        repository.updateVendorBankDetails(bankName, accountNumber)
+    }
+
     fun toggleOffline() {
         viewModelScope.launch {
             val nextOffline = !isOffline.value

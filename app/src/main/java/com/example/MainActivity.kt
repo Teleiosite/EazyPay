@@ -88,6 +88,22 @@ fun EazyPayAppNavigator() {
                 },
                 onWatchDemo = {
                     navController.navigate("demo_split_screen")
+                },
+                onQuickLogin = { role ->
+                    currentPhone = if (role == "student") "8012345678" else "8011112222"
+                    chosenRole = role
+                    viewModel.setRole(role)
+                    viewModel.setPin("1234")
+                    viewModel.setRegistered(true, currentPhone, role)
+                    if (role == "student") {
+                        navController.navigate("student_main") {
+                            popUpTo("register") { inclusive = true }
+                        }
+                    } else {
+                        navController.navigate("vendor_main") {
+                            popUpTo("register") { inclusive = true }
+                        }
+                    }
                 }
             )
         }

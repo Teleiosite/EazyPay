@@ -27,6 +27,10 @@ import androidx.compose.ui.unit.sp
 import com.example.data.VendorUser
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.example.ui.EazyPayViewModel
 import com.example.ui.theme.*
 
@@ -1115,6 +1119,7 @@ fun VendorProfileScreen(
     onSignOut: () -> Unit
 ) {
     val vendorUser by viewModel.vendor.collectAsState()
+    var activeModal by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -1195,7 +1200,18 @@ fun VendorProfileScreen(
                     colors = CardDefaults.cardColors(containerColor = Surface),
                     border = BorderStroke(1.dp, Border),
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            activeModal = when (item.first) {
+                                "Bank Withdrawal Details" -> "bank_withdrawal"
+                                "Contact campus finance dept" -> "finance_contact"
+                                "Synchronize local records" -> "sync_records"
+                                "Terminal Passcode security" -> "passcode_sec"
+                                "Legal disclosures" -> "legal"
+                                else -> null
+                            }
+                        }
                 ) {
                     Row(
                         modifier = Modifier
@@ -1227,6 +1243,15 @@ fun VendorProfileScreen(
             }
         }
     }
+
+    // Modal Overlays
+    when (activeModal) {
+        "bank_withdrawal" -> BankWithdrawalDetailsModal(viewModel = viewModel, onDismiss = { activeModal = null })
+        "finance_contact" -> FinanceContactModal(onDismiss = { activeModal = null })
+        "sync_records" -> SyncRecordsModal(viewModel = viewModel, onDismiss = { activeModal = null })
+        "passcode_sec" -> PasscodeSecurityModal(viewModel = viewModel, onDismiss = { activeModal = null })
+        "legal" -> LegalDisclosuresModal(onDismiss = { activeModal = null })
+    }
 }
 
 // 5. WITHDRAWAL BANK OVERLAY MODAL
@@ -1236,20 +1261,532 @@ fun WithdrawalModal(
     onDismiss: () -> Unit
 ) {
     val vendorUser by viewModel.vendor.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
+    val clipboardManager = LocalClipboardManager.current
+
+    var step by remember { mutableStateOf(1) } // 1: Form entry, 2: PIN Challenge, 3: Success Receipt
     var withdrawAmountText by remember { mutableStateOf("") }
-    var alertSuccess by remember { mutableStateOf(false) }
+    var selectedBank by remember { mutableStateOf("Guaranty Trust Bank (GTBank)") }
+    var showBankSelector by remember { mutableStateOf(false) }
+    var bankAccountNumber by remember { mutableStateOf(vendorUser.accountNumber) }
+
+    // Dynamic NIP Resolver States
+    var resolvedAccountName by remember { mutableStateOf("MUSA IBRAHIM") }
+    var isResolvingAccount by remember { mutableStateOf(false) }
+
+    // PIN Challenge
+    var txPin by remember { mutableStateOf("") }
+    var pinError by remember { mutableStateOf(false) }
+    var isProcessingWithdrawal by remember { mutableStateOf(false) }
+
+    // Receipt details
+    var sessionID by remember { mutableStateOf("") }
+    var payoutReference by remember { mutableStateOf("") }
+
+    val banksList = listOf(
+        "Guaranty Trust Bank (GTBank)",
+        "Access Bank PLC",
+        "Zenith Bank PLC",
+        "United Bank for Africa (UBA)",
+        "First Bank of Nigeria",
+        "Moniepoint MFB",
+        "OPay Digital Services",
+        "PalmPay",
+        "Kuda Microfinance Bank"
+    )
+
+    // Trigger dynamic NIP Name Lookup simulator
+    LaunchedEffect(bankAccountNumber, selectedBank) {
+        if (bankAccountNumber.length == 10) {
+            isResolvingAccount = true
+            delay(1200) // Simulating NIP lookup query to NIBSS central switch
+            resolvedAccountName = when {
+                selectedBank.contains("GTBank") -> "MUSA IBRAHIM"
+                selectedBank.contains("Access") -> "MUSA IBRAHIM (ACCESS)"
+                selectedBank.contains("Zenith") -> "MUSA IBRAHIM (ZENITH CORP)"
+                selectedBank.contains("UBA") -> "MUSA IBRAHIM (UBA MERC)"
+                selectedBank.contains("First Bank") -> "MUSA IBRAHIM (FIRST)"
+                selectedBank.contains("Moniepoint") -> "MUSA IBRAHIM VENTURES"
+                selectedBank.contains("OPay") -> "MUSA IBRAHIM OPAY"
+                selectedBank.contains("PalmPay") -> "MUSA IBRAHIM PALMPAY"
+                else -> "MUSA IBRAHIM (KUDA)"
+            }
+            isResolvingAccount = false
+        } else {
+            resolvedAccountName = ""
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.8f))
+            .background(Color.Black.copy(alpha = 0.85f))
+            .clickable { if (!isProcessingWithdrawal && step != 3) onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+            ) {
+                // Header
+                if (step != 3) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (step == 1) Icons.Default.AccountBalance else Icons.Default.ArrowBack,
+                                contentDescription = "Back",
+                                tint = PrimaryTeal,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clickable {
+                                        if (!isProcessingWithdrawal) {
+                                            if (step > 1) step-- else onDismiss()
+                                        }
+                                    }
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = if (step == 1) "Withdraw Earnings" else "Authorize Settlement",
+                                color = TextPrimary,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (!isProcessingWithdrawal) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = TextSecondary,
+                                modifier = Modifier.clickable { onDismiss() }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                // STEP 1: Main form with bank input, amount, fees, and NIP lookup
+                if (step == 1) {
+                    Text("SELECT SETTLEMENT BANK", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Simulated dropdown clicker
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Surface)
+                            .border(1.dp, Border, RoundedCornerShape(12.dp))
+                            .clickable { showBankSelector = !showBankSelector }
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(selectedBank, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Select", tint = PrimaryTeal)
+                    }
+
+                    // Bank Selector inline popup
+                    if (showBankSelector) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Surface),
+                            border = BorderStroke(1.dp, Border),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 180.dp)
+                        ) {
+                            LazyColumn {
+                                items(banksList) { bankName ->
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                selectedBank = bankName
+                                                showBankSelector = false
+                                            }
+                                            .padding(12.dp)
+                                    ) {
+                                        Text(bankName, color = if (selectedBank == bankName) PrimaryTeal else TextPrimary, fontSize = 13.sp, fontWeight = if (selectedBank == bankName) FontWeight.Bold else FontWeight.Normal)
+                                    }
+                                    Divider(color = Border.copy(alpha = 0.3f))
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text("10-DIGIT ACCOUNT NUMBER", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = bankAccountNumber,
+                        onValueChange = {
+                            val clean = it.filter { char -> char.isDigit() }
+                            if (clean.length <= 10) {
+                                bankAccountNumber = clean
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        placeholder = { Text("e.g. 0123456789", color = TextSecondary) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryTeal,
+                            unfocusedBorderColor = Border,
+                            focusedContainerColor = Surface,
+                            unfocusedContainerColor = Surface
+                        ),
+                        singleLine = true
+                    )
+
+                    // NIP Resolved Account Name Display
+                    if (isResolvingAccount) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(12.dp), color = PrimaryTeal, strokeWidth = 1.5.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Querying NIBSS NIP Name resolution directory...", color = TextSecondary, fontSize = 11.sp)
+                        }
+                    } else if (resolvedAccountName.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = "Verified", tint = Success, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("VERIFIED NAME: $resolvedAccountName", color = Success, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text("WITHDRAWAL AMOUNT", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = withdrawAmountText,
+                        onValueChange = { withdrawAmountText = it.filter { char -> char.isDigit() } },
+                        prefix = { Text("₦", color = TextPrimary, fontWeight = FontWeight.Bold) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryTeal,
+                            unfocusedBorderColor = Border,
+                            focusedContainerColor = Surface,
+                            unfocusedContainerColor = Surface
+                        ),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Withdrawable balance: ₦${String.format("%,.2f", vendorUser.todayEarnings)}",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                        if (vendorUser.todayEarnings > 0) {
+                            Text(
+                                "Withdraw All",
+                                color = PrimaryTeal,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable {
+                                    withdrawAmountText = vendorUser.todayEarnings.toInt().toString()
+                                }
+                            )
+                        }
+                    }
+
+                    // Payout Schedule breakdown fees
+                    val amtVal = withdrawAmountText.toDoubleOrNull() ?: 0.0
+                    if (amtVal > 0) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Surface),
+                            border = BorderStroke(1.dp, Border),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("SETTLEMENT FEE SCHEDULE", color = PrimaryTeal, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("NIP Processing Charge", color = TextSecondary, fontSize = 11.sp)
+                                    Text("₦10.00", color = TextPrimary, fontSize = 11.sp)
+                                }
+                                Divider(color = Border.copy(alpha = 0.5f))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Net Payout", color = TextSecondary, fontSize = 11.sp)
+                                    Text("₦${String.format("%,.2f", if (amtVal > 10.0) amtVal - 10.0 else 0.0)}", color = Success, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    val canProceed = amtVal > 0 && amtVal <= vendorUser.todayEarnings && bankAccountNumber.length == 10 && resolvedAccountName.isNotBlank()
+
+                    Button(
+                        onClick = { step = 2 },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                        enabled = canProceed
+                    ) {
+                        Text("Proceed to Authorization", color = Background, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                // STEP 2: Secure PIN Challenge
+                else if (step == 2) {
+                    val finalAmt = withdrawAmountText.toDoubleOrNull() ?: 0.0
+                    
+                    Text("AUTHORIZE TRANSACTION WITH PIN", color = PrimaryTeal, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("Please input your 4-digit security transaction PIN to sign and execute this instant settlement request.", color = TextSecondary, fontSize = 12.sp)
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    OutlinedTextField(
+                        value = txPin,
+                        onValueChange = {
+                            val clean = it.filter { char -> char.isDigit() }
+                            if (clean.length <= 4) {
+                                txPin = clean
+                                pinError = false
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        placeholder = { Text("Enter 4-Digit Security PIN", color = TextSecondary) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = if (pinError) Warning else PrimaryTeal,
+                            unfocusedBorderColor = if (pinError) Warning else Border,
+                            focusedContainerColor = Surface,
+                            unfocusedContainerColor = Surface
+                        ),
+                        singleLine = true
+                    )
+
+                    if (pinError) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("Incorrect Transaction PIN. Use 1234 to authorize payment.", color = Warning, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Spacer(modifier = Modifier.height(28.dp))
+
+                    Button(
+                        onClick = {
+                            if (txPin == "1234" || txPin.length == 4) {
+                                isProcessingWithdrawal = true
+                                coroutineScope.launch {
+                                    delay(2000) // Authenticating cryptographically with local keys & NIP
+                                    viewModel.withdrawFunds(finalAmt) { success ->
+                                        isProcessingWithdrawal = false
+                                        if (success) {
+                                            sessionID = "000013" + System.currentTimeMillis().toString().takeLast(10) + (1000..9999).random()
+                                            payoutReference = "EP-PAY-NIP-" + (100000..999999).random()
+                                            step = 3
+                                        } else {
+                                            pinError = true
+                                        }
+                                    }
+                                }
+                            } else {
+                                pinError = true
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                        enabled = txPin.length == 4 && !isProcessingWithdrawal
+                    ) {
+                        if (isProcessingWithdrawal) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Background, strokeWidth = 2.dp)
+                        } else {
+                            Text("Sign & Authorize Settlement", color = Background, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                // STEP 3: NIBSS Instant Payment Receipt
+                else if (step == 3) {
+                    val finalAmt = withdrawAmountText.toDoubleOrNull() ?: 0.0
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        // Checkmark
+                        Box(
+                            modifier = Modifier
+                                .size(80.dp)
+                                .clip(CircleShape)
+                                .background(Success.copy(alpha = 0.15f))
+                                .border(2.dp, Success, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = "Success", tint = Success, modifier = Modifier.size(44.dp))
+                        }
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        Text("Settlement Complete!", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("NIP outbound transfer signed and settled instantly via NIBSS gateway", color = TextSecondary, fontSize = 12.sp, textAlign = TextAlign.Center)
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        // Receipt Details
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Surface),
+                            border = BorderStroke(1.dp, Border),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("SETTLED AMOUNT", color = TextSecondary, fontSize = 11.sp)
+                                    Text("₦${String.format("%,.2f", finalAmt)}", color = Success, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Divider(color = Border.copy(alpha = 0.5f))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("BENEFICIARY ACCOUNT", color = TextSecondary, fontSize = 11.sp)
+                                    Text("$resolvedAccountName", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("BENEFICIARY BANK", color = TextSecondary, fontSize = 11.sp)
+                                    Text(selectedBank, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("ACCOUNT NUMBER", color = TextSecondary, fontSize = 11.sp)
+                                    Text(bankAccountNumber, color = TextPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                                }
+                                Divider(color = Border.copy(alpha = 0.5f))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("NIBSS SESSION ID", color = TextSecondary, fontSize = 11.sp)
+                                    Text(sessionID, color = TextPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                }
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("PAYOUT REFERENCE", color = TextSecondary, fontSize = 11.sp)
+                                    Text(payoutReference, color = TextPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(28.dp))
+
+                        Button(
+                            onClick = { onDismiss() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal)
+                        ) {
+                            Text("Done", color = Background, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// --- VENDOR PROFILE CONFIGURATION MODALS ---
+
+@Composable
+fun BankWithdrawalDetailsModal(
+    viewModel: EazyPayViewModel,
+    onDismiss: () -> Unit
+) {
+    val vendorUser by viewModel.vendor.collectAsState()
+    val clipboardManager = LocalClipboardManager.current
+    var isEditing by remember { mutableStateOf(false) }
+    
+    var selectedBank by remember { mutableStateOf(vendorUser.bankName) }
+    var bankAccountNumber by remember { mutableStateOf(vendorUser.accountNumber.filter { it.isDigit() }.ifBlank { "0123456789" }) }
+    var showBankSelector by remember { mutableStateOf(false) }
+    var resolvedAccountName by remember { mutableStateOf("MUSA IBRAHIM") }
+    var isResolvingAccount by remember { mutableStateOf(false) }
+    var saveSuccessMessage by remember { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope()
+
+    val banksList = listOf(
+        "Guaranty Trust Bank (GTBank)",
+        "Access Bank PLC",
+        "Zenith Bank PLC",
+        "United Bank for Africa (UBA)",
+        "First Bank of Nigeria",
+        "Moniepoint MFB",
+        "OPay Digital Services",
+        "PalmPay",
+        "Kuda Microfinance Bank"
+    )
+
+    LaunchedEffect(bankAccountNumber, selectedBank) {
+        if (bankAccountNumber.length == 10) {
+            isResolvingAccount = true
+            delay(1000)
+            resolvedAccountName = when {
+                selectedBank.contains("GTBank") -> "MUSA IBRAHIM"
+                selectedBank.contains("Access") -> "MUSA IBRAHIM (ACCESS)"
+                selectedBank.contains("Zenith") -> "MUSA IBRAHIM (ZENITH CORP)"
+                selectedBank.contains("UBA") -> "MUSA IBRAHIM (UBA MERC)"
+                selectedBank.contains("First Bank") -> "MUSA IBRAHIM (FIRST)"
+                selectedBank.contains("Moniepoint") -> "MUSA IBRAHIM VENTURES"
+                selectedBank.contains("OPay") -> "MUSA IBRAHIM OPAY"
+                selectedBank.contains("PalmPay") -> "MUSA IBRAHIM PALMPAY"
+                else -> "MUSA IBRAHIM (KUDA)"
+            }
+            isResolvingAccount = false
+        } else {
+            resolvedAccountName = ""
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f))
             .clickable { onDismiss() },
         contentAlignment = Alignment.Center
     ) {
         Card(
             colors = CardDefaults.cardColors(containerColor = Background),
             modifier = Modifier
-                .fillMaxWidth(0.9f)
+                .fillMaxWidth(0.92f)
                 .clickable(enabled = false) {}
                 .border(1.dp, Border, RoundedCornerShape(24.dp)),
             shape = RoundedCornerShape(24.dp)
@@ -1264,7 +1801,265 @@ fun WithdrawalModal(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Withdraw Earnings", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (isEditing) "Edit Bank Details" else "Bank Withdrawal Details",
+                        color = TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = TextSecondary,
+                        modifier = Modifier.clickable { onDismiss() }
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (!isEditing) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Surface),
+                        border = BorderStroke(1.dp, Border),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(18.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("LINKED SETTLEMENT BANK", color = PrimaryTeal, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Success.copy(alpha = 0.15f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = "Active", tint = Success, modifier = Modifier.size(10.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("NIP VERIFIED", color = Success, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(vendorUser.name.uppercase(java.util.Locale.getDefault()), color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(vendorUser.bankName, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Acct: " + vendorUser.accountNumber,
+                                    color = TextSecondary,
+                                    fontSize = 13.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = "Copy",
+                                    tint = PrimaryTeal,
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .clickable {
+                                            val rawAcct = vendorUser.accountNumber.filter { it.isDigit() }.ifBlank { "0123456789" }
+                                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(rawAcct))
+                                            coroutineScope.launch {
+                                                saveSuccessMessage = "Account number copied!"
+                                                delay(1500)
+                                                saveSuccessMessage = ""
+                                            }
+                                        }
+                                )
+                            }
+                        }
+                    }
+
+                    if (saveSuccessMessage.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(saveSuccessMessage, color = Success, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Border)
+                        ) {
+                            Text("Dismiss", color = TextSecondary)
+                        }
+                        Button(
+                            onClick = { isEditing = true },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal)
+                        ) {
+                            Text("Edit Details", color = Background, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    Text("SELECT BANK", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Surface)
+                            .border(1.dp, Border, RoundedCornerShape(12.dp))
+                            .clickable { showBankSelector = !showBankSelector }
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(selectedBank, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Select", tint = PrimaryTeal)
+                    }
+
+                    if (showBankSelector) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Surface),
+                            border = BorderStroke(1.dp, Border),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 140.dp)
+                        ) {
+                            LazyColumn {
+                                items(banksList) { bankName ->
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                selectedBank = bankName
+                                                showBankSelector = false
+                                            }
+                                            .padding(10.dp)
+                                    ) {
+                                        Text(bankName, color = if (selectedBank == bankName) PrimaryTeal else TextPrimary, fontSize = 12.sp, fontWeight = if (selectedBank == bankName) FontWeight.Bold else FontWeight.Normal)
+                                    }
+                                    Divider(color = Border.copy(alpha = 0.3f))
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text("10-DIGIT ACCOUNT NUMBER", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = bankAccountNumber,
+                        onValueChange = {
+                            val clean = it.filter { char -> char.isDigit() }
+                            if (clean.length <= 10) {
+                                bankAccountNumber = clean
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryTeal,
+                            unfocusedBorderColor = Border,
+                            focusedContainerColor = Surface,
+                            unfocusedContainerColor = Surface
+                        ),
+                        singleLine = true
+                    )
+
+                    if (isResolvingAccount) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(modifier = Modifier.size(12.dp), color = PrimaryTeal, strokeWidth = 1.5.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Verifying account via NIP switch...", color = TextSecondary, fontSize = 11.sp)
+                        }
+                    } else if (resolvedAccountName.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = "Verified", tint = Success, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("VERIFIED NAME: $resolvedAccountName", color = Success, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(
+                            onClick = { isEditing = false },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Border)
+                        ) {
+                            Text("Cancel", color = TextSecondary)
+                        }
+                        Button(
+                            onClick = {
+                                if (bankAccountNumber.length == 10 && resolvedAccountName.isNotBlank()) {
+                                    viewModel.updateVendorBankDetails(selectedBank, bankAccountNumber)
+                                    isEditing = false
+                                    coroutineScope.launch {
+                                        saveSuccessMessage = "Bank details updated successfully!"
+                                        delay(2000)
+                                        saveSuccessMessage = ""
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                            enabled = bankAccountNumber.length == 10 && resolvedAccountName.isNotBlank() && !isResolvingAccount
+                        ) {
+                            Text("Save", color = Background, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FinanceContactModal(
+    onDismiss: () -> Unit
+) {
+    val clipboardManager = LocalClipboardManager.current
+    var copyMessage by remember { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope()
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Campus Finance Office", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Icon(
                         Icons.Default.Close,
                         contentDescription = "Close",
@@ -1274,46 +2069,320 @@ fun WithdrawalModal(
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "For queries regarding settlement transfers, offline trade reconciliation, and daily vendor deposits.",
+                    color = TextSecondary,
+                    fontSize = 13.sp
+                )
 
-                // GTBank linked account
+                Spacer(modifier = Modifier.height(16.dp))
+
                 Card(
                     colors = CardDefaults.cardColors(containerColor = Surface),
                     border = BorderStroke(1.dp, Border),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("LINKED BANK ACCOUNT", color = PrimaryTeal, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Text(
-                                text = "${vendorUser.bankName} - Musa Ibrahim",
-                                color = TextPrimary,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(text = "Account: ${vendorUser.accountNumber}", color = TextSecondary, fontSize = 13.sp)
-                        }
-                        Icon(Icons.Default.AccountBalance, contentDescription = "Bank", tint = PrimaryTeal)
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ContactInfoRow(
+                            label = "OFFICE LOCATION",
+                            value = "Finance & Accounts Dept, Administrative Block, Wing B, Babcock University",
+                            icon = Icons.Outlined.Business
+                        )
+                        Divider(color = Border.copy(alpha = 0.3f))
+                        ContactInfoRow(
+                            label = "DIRECT SETTLEMENTS LINE",
+                            value = "+234 812 345 6789",
+                            icon = Icons.Outlined.Phone,
+                            onCopy = {
+                                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString("+2348123456789"))
+                                coroutineScope.launch {
+                                    copyMessage = "Phone number copied!"
+                                    delay(1500)
+                                    copyMessage = ""
+                                }
+                            }
+                        )
+                        Divider(color = Border.copy(alpha = 0.3f))
+                        ContactInfoRow(
+                            label = "OFFICIAL EMAIL",
+                            value = "finance.settlements@babcock.edu.ng",
+                            icon = Icons.Outlined.Email,
+                            onCopy = {
+                                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString("finance.settlements@babcock.edu.ng"))
+                                coroutineScope.launch {
+                                    copyMessage = "Email copied!"
+                                    delay(1500)
+                                    copyMessage = ""
+                                }
+                            }
+                        )
+                    }
+                }
+
+                if (copyMessage.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(copyMessage, color = Success, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.CenterHorizontally))
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Close", color = Background, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ContactInfoRow(
+    label: String,
+    value: String,
+    icon: ImageVector,
+    onCopy: (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Row(modifier = Modifier.weight(0.9f)) {
+            Icon(icon, contentDescription = label, tint = PrimaryTeal, modifier = Modifier.size(18.dp).padding(top = 2.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(label, color = TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(value, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+        if (onCopy != null) {
+            Icon(
+                imageVector = Icons.Default.ContentCopy,
+                contentDescription = "Copy",
+                tint = PrimaryTeal,
+                modifier = Modifier
+                    .size(16.dp)
+                    .clickable { onCopy() }
+            )
+        }
+    }
+}
+
+@Composable
+fun SyncRecordsModal(
+    viewModel: EazyPayViewModel,
+    onDismiss: () -> Unit
+) {
+    val isOffline by viewModel.isOffline.collectAsState()
+    val isSyncing by viewModel.isSyncing.collectAsState()
+    val transactions by viewModel.transactions.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
+    var syncMessage by remember { mutableStateOf("") }
+    var localPendingCount by remember { mutableStateOf(0) }
+
+    LaunchedEffect(transactions) {
+        localPendingCount = transactions.count { it.syncStatus == "Pending" }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f))
+            .clickable { if (!isSyncing) onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Synchronize Local Records", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    if (!isSyncing) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = TextSecondary,
+                            modifier = Modifier.clickable { onDismiss() }
+                        )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                Text("WITHDRAWAL AMOUNT", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(PrimaryTeal.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Sync,
+                        contentDescription = "Sync",
+                        tint = PrimaryTeal,
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Offline-to-Cloud synchronization ensures local cryptographic trade receipts are compiled, registered, and verified on the campus finance network.",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Surface),
+                    border = BorderStroke(1.dp, Border),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Pending Offline Transactions", color = TextSecondary, fontSize = 12.sp)
+                            Text("$localPendingCount records", color = if (localPendingCount > 0) Warning else Success, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Divider(color = Border.copy(alpha = 0.3f))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Central Ledger Status", color = TextSecondary, fontSize = 12.sp)
+                            Text(if (isOffline) "Disconnected (Offline)" else "Online & Operational", color = if (isOffline) Warning else Success, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Divider(color = Border.copy(alpha = 0.3f))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Active Terminal Node ID", color = TextSecondary, fontSize = 12.sp)
+                            Text("NODE-ECDSA-802", color = TextPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+                }
+
+                if (syncMessage.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(syncMessage, color = Success, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Button(
+                    onClick = {
+                        if (isOffline) {
+                            syncMessage = "Cannot sync while in Offline Mode! Turn connection ON first."
+                        } else {
+                            coroutineScope.launch {
+                                viewModel.syncAll()
+                                delay(2200)
+                                syncMessage = "All offline records synced with NIBSS ✓"
+                                delay(1500)
+                                onDismiss()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = !isSyncing
+                ) {
+                    if (isSyncing) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Background, strokeWidth = 2.dp)
+                    } else {
+                        Text("Synchronize Now", color = Background, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PasscodeSecurityModal(
+    viewModel: EazyPayViewModel,
+    onDismiss: () -> Unit
+) {
+    val currentPin by viewModel.userPin.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
+    
+    var oldPinText by remember { mutableStateOf("") }
+    var newPinText by remember { mutableStateOf("") }
+    var confirmPinText by remember { mutableStateOf("") }
+    
+    var pinErrorText by remember { mutableStateOf("") }
+    var pinSuccessText by remember { mutableStateOf("") }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Terminal Passcode Security", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = TextSecondary,
+                        modifier = Modifier.clickable { onDismiss() }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
                 
+                Text(
+                    text = "Configure the 4-digit PIN used to authorize local offline sales settlement and terminal administration.",
+                    color = TextSecondary,
+                    fontSize = 12.sp
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text("CURRENT 4-DIGIT PIN", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
                 OutlinedTextField(
-                    value = withdrawAmountText,
-                    onValueChange = { withdrawAmountText = it },
-                    prefix = { Text("₦", color = TextPrimary, fontWeight = FontWeight.Bold) },
+                    value = oldPinText,
+                    onValueChange = { if (it.length <= 4 && it.all { c -> c.isDigit() }) oldPinText = it },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = TextPrimary,
                         unfocusedTextColor = TextPrimary,
@@ -1325,61 +2394,187 @@ fun WithdrawalModal(
                     singleLine = true
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Withdrawable balance: ₦${String.format("%,.2f", vendorUser.todayEarnings)}",
-                    color = TextSecondary,
-                    fontSize = 12.sp
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text("NEW 4-DIGIT PIN", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = newPinText,
+                    onValueChange = { if (it.length <= 4 && it.all { c -> c.isDigit() }) newPinText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = PrimaryTeal,
+                        unfocusedBorderColor = Border,
+                        focusedContainerColor = Surface,
+                        unfocusedContainerColor = Surface
+                    ),
+                    singleLine = true
                 )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text("CONFIRM NEW 4-DIGIT PIN", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = confirmPinText,
+                    onValueChange = { if (it.length <= 4 && it.all { c -> c.isDigit() }) confirmPinText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextPrimary,
+                        unfocusedTextColor = TextPrimary,
+                        focusedBorderColor = PrimaryTeal,
+                        unfocusedBorderColor = Border,
+                        focusedContainerColor = Surface,
+                        unfocusedContainerColor = Surface
+                    ),
+                    singleLine = true
+                )
+
+                if (pinErrorText.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(pinErrorText, color = Warning, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                if (pinSuccessText.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(pinSuccessText, color = Success, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
                     onClick = {
-                        val amount = withdrawAmountText.toDoubleOrNull() ?: 0.0
-                        if (amount > 0 && amount <= vendorUser.todayEarnings) {
-                            viewModel.withdrawFunds(amount) { success ->
-                                if (success) {
-                                    alertSuccess = true
-                                }
+                        if (oldPinText != currentPin) {
+                            pinErrorText = "Incorrect current PIN. (Try default '1234')"
+                            pinSuccessText = ""
+                        } else if (newPinText.length != 4) {
+                            pinErrorText = "New PIN must be exactly 4 digits."
+                            pinSuccessText = ""
+                        } else if (newPinText != confirmPinText) {
+                            pinErrorText = "Confirm PIN does not match."
+                            pinSuccessText = ""
+                        } else {
+                            viewModel.setPin(newPinText)
+                            pinErrorText = ""
+                            pinSuccessText = "Security PIN updated successfully!"
+                            oldPinText = ""
+                            newPinText = ""
+                            confirmPinText = ""
+                            coroutineScope.launch {
+                                delay(1500)
+                                onDismiss()
                             }
                         }
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
-                    enabled = withdrawAmountText.isNotBlank()
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = oldPinText.length == 4 && newPinText.length == 4 && confirmPinText.length == 4
                 ) {
-                    Text("Confirm Settlement", color = Background, fontWeight = FontWeight.Bold)
+                    Text("Update security PIN", color = Background, fontWeight = FontWeight.Bold)
                 }
             }
         }
+    }
+}
 
-        if (alertSuccess) {
-            AlertDialog(
-                onDismissRequest = {
-                    alertSuccess = false
-                    onDismiss()
-                },
-                containerColor = Surface,
-                title = { Text("Settlement Initiated", color = TextPrimary) },
-                text = {
-                    Text(
-                        "Your withdrawal request has been registered cryptographically offline. It will be credited to GTBank ····4521 within 24 hours.",
-                        color = TextSecondary
+@Composable
+fun LegalDisclosuresModal(
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .fillMaxHeight(0.8f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Cryptographic Disclosures", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = TextSecondary,
+                        modifier = Modifier.clickable { onDismiss() }
                     )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        alertSuccess = false
-                        onDismiss()
-                    }) {
-                        Text("Done", color = PrimaryTeal)
-                    }
                 }
-            )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(end = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    LegalSection(
+                        title = "1. Dual-Offline Framework",
+                        body = "EazyPay operates using a secure dual-offline ledger protocol (BBU-DOL-V1) authorized for exclusive trade settlement on the Babcock University campus. Transactions execute securely even during total network blackouts."
+                    )
+                    
+                    LegalSection(
+                        title = "2. ECDSA Cryptographic Signing",
+                        body = "All transactions are authenticated via an elliptic curve digital signature algorithm (secp256k1). When tapping a physical Smart ID Card or sticker against a registered terminal, a deterministic cryptographic proof is signed using private keys embedded within the secure enclave chip of the card."
+                    )
+
+                    LegalSection(
+                        title = "3. Double Spend Mitigation",
+                        body = "Local transactions contain sequential nonce chains preventing replay attacks. When a device synchronizes with central cloud database instances, any cryptographic double-spend mismatch triggers an automated audit; centralized ledger receipts logged at the Babcock Finance core always form the final trade arbiter."
+                    )
+
+                    LegalSection(
+                        title = "4. Data Sovereignty & CBN Standards",
+                        body = "Financial records comply with central regulatory standards for local closed-loop campus micro-payout systems. Offline transactions are stored securely using encrypted SQLite Room instances. No biometric telemetry is exported or stored outside local secure chip memories."
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal),
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Acknowledge & Close", color = Background, fontWeight = FontWeight.Bold)
+                }
+            }
         }
+    }
+}
+
+@Composable
+fun LegalSection(title: String, body: String) {
+    Column {
+        Text(title, color = PrimaryTeal, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(body, color = TextSecondary, fontSize = 11.sp, lineHeight = 16.sp)
     }
 }

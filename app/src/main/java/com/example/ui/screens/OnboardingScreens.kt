@@ -238,7 +238,8 @@ fun OnboardingScreen(
 @Composable
 fun RegisterScreen(
     onContinue: (phone: String, role: String) -> Unit,
-    onWatchDemo: () -> Unit
+    onWatchDemo: () -> Unit,
+    onQuickLogin: (role: String) -> Unit
 ) {
     var phone by remember { mutableStateOf("") }
     var selectedRole by remember { mutableStateOf("student") } // "student" or "vendor"
@@ -421,6 +422,22 @@ fun RegisterScreen(
                         color = Background,
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = { onQuickLogin(selectedRole) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, PrimaryTeal),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryTeal)
+                ) {
+                    Text(
+                        text = "⚡ Quick Bypass (Skip Registration)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
                     )
                 }
                 Spacer(modifier = Modifier.height(12.dp))
