@@ -1,8 +1,8 @@
 # EazyPay ⚡
 
-EazyPay is an **offline-first, NFC-enabled campus cashless payment platform** designed for educational institutions like Babcock University. It solves the critical challenge of network instability and transaction failures in crowded campus environments (cafeterias, print shops, transport hubs) by using **secure offline cryptographic ledgers** and **contactless smart verification**. 
+EazyPay is an **offline-first, NFC-enabled campus cashless payment platform** designed for educational institutions like Babcock University. It solves the critical challenge of network instability and transaction failures in crowded campus environments (cafeterias, print shops, transport hubs) with a planned architecture for **secure offline cryptographic ledgers** and **contactless smart verification**.
 
-The application utilizes local secure hardware emulation to verify balances and sign transactions completely offline, synchronizing securely with the central bank settlement system once connection is restored.
+The current Android app is a UI-rich pilot prototype with an initial production-hardening baseline. It now avoids storing raw PINs locally, disables Android backup for payment-sensitive state, and uses production-style package/release hardening settings. It still requires the authoritative backend ledger, real NFC/card-token implementation, encrypted offline queue, regulated payment integrations, and admin operations stack before any real-money launch.
 
 ---
 
@@ -57,10 +57,10 @@ EazyPay does not require active internet connection at point-of-sale terminals b
        │ <── 5. Payment Completed (Receipt Logged) ────│
 ```
 
-1.  **Signed Ledger Token**: At registration, the student device receives a central authority cryptographic token containing authorization keys, encrypted balance thresholds, and user profiles.
-2.  **ECDSA secp256k1 Authentication**: When a payment occurs offline, the student app signs the transaction details using a unique private key.
-3.  **Terminal-Side Public Key Verification**: The vendor terminal (which stores the Babcock Central Key registry offline) verifies the signature and records the purchase, deducting the amount from the offline balance.
-4.  **AES-256 GCM Local Logs**: All pending logs on both student and vendor terminals are stored locally inside database tables using military-grade AES-256 GCM encryption parameters.
+1.  **Target Signed Ledger Token**: At registration, the production system should issue a central authority cryptographic token containing authorization keys, encrypted balance thresholds, and user profiles.
+2.  **Target Transaction Authentication**: Production offline payments should sign transaction details using a device/card-bound private key.
+3.  **Target Terminal-Side Verification**: The vendor terminal should verify signed tokens using an offline Babcock/EazyPay key registry before recording purchases.
+4.  **Current Local Baseline**: The current app demonstrates the UX flow locally; raw PIN persistence has been replaced with salted PBKDF2 verifiers, but encrypted offline queues and real token signing are still required.
 
 ---
 
@@ -115,5 +115,5 @@ app/src/main/java/com/example/
 
 ## 🛡️ License
 
-Built with ⚡ for Babcock University and Babcock Campus Cashless Operations. 
+Built with ⚡ for Babcock University and Babcock Campus Cashless Operations.
 © 2026 EazyPay Platform Services. All Rights Reserved.

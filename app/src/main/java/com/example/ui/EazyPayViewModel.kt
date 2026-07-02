@@ -26,7 +26,6 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
     val isSyncing = repository.isSyncing
     val student = repository.student
     val vendor = repository.vendor
-    val userPin = repository.userPin
     val offers = repository.offers
     val transactions = repository.transactions.stateIn(
         scope = viewModelScope,
@@ -128,6 +127,8 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun verifyPin(pin: String): Boolean = repository.verifyPin(pin)
+
     fun appendPinChar(char: Char, onPinComplete: () -> Unit) {
         if (_isLockedOut.value) return
         if (_pinBuffer.value.length < 4) {
@@ -178,7 +179,7 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
 
     private fun verifyPinAndExecute(onPinComplete: () -> Unit) {
         viewModelScope.launch {
-            if (_pinBuffer.value == userPin.value) {
+            if (repository.verifyPin(_pinBuffer.value)) {
                 _pinError.value = false
                 _pinAttemptsRemaining.value = 3 // reset attempts
                 onPinComplete()

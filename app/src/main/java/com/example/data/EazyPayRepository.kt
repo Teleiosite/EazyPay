@@ -91,9 +91,8 @@ class EazyPayRepository(context: Context) {
     )
     val vendor: StateFlow<VendorUser> = _vendor
 
-    // PIN State
-    private val _userPin = MutableStateFlow(prefs.getString("user_pin", "1234") ?: "1234")
-    val userPin: StateFlow<String> = _userPin
+    // PIN verifier state. The raw PIN is never exposed through app state or persisted.
+    private val _pinHash = MutableStateFlow(ensurePinHash())
 
     // Offers
     val offers = listOf(
@@ -110,6 +109,23 @@ class EazyPayRepository(context: Context) {
         kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             seedInitialData()
         }
+    }
+
+    private fun ensurePinHash(): String {
+        prefs.getString("pin_hash", null)?.let { return it }
+
+        val legacyPlaintextPin = prefs.getString("user_pin", null)
+        val initialPin = legacyPlaintextPin
+            ?.takeIf(SecurityUtils::isValidFourDigitPin)
+            ?: "1234"
+        val hashedPin = SecurityUtils.hashPin(initialPin)
+
+        prefs.edit()
+            .putString("pin_hash", hashedPin)
+            .remove("user_pin")
+            .apply()
+
+        return hashedPin
     }
 
     fun setRegistered(registered: Boolean, phone: String? = null, role: String? = null) {
@@ -200,9 +216,15 @@ class EazyPayRepository(context: Context) {
     }
 
     fun setPin(pin: String) {
-        _userPin.value = pin
-        prefs.edit().putString("user_pin", pin).apply()
+        val hashedPin = SecurityUtils.hashPin(pin)
+        _pinHash.value = hashedPin
+        prefs.edit()
+            .putString("pin_hash", hashedPin)
+            .remove("user_pin")
+            .apply()
     }
+
+    fun verifyPin(pin: String): Boolean = SecurityUtils.verifyPin(pin, _pinHash.value)
 
     suspend fun topUpWallet(amount: Double) {
         val currentStudent = _student.value
