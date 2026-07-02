@@ -2066,7 +2066,6 @@ fun ChangePinModal(
     viewModel: EazyPayViewModel,
     onDismiss: () -> Unit
 ) {
-    val userPin by viewModel.userPin.collectAsState()
     var currentPinInput by remember { mutableStateOf("") }
     var newPinInput by remember { mutableStateOf("") }
     var confirmPinInput by remember { mutableStateOf("") }
@@ -2196,7 +2195,7 @@ fun ChangePinModal(
                     Button(
                         onClick = {
                             when {
-                                currentPinInput != userPin -> {
+                                !viewModel.verifyPin(currentPinInput) -> {
                                     errorMessage = "Current security PIN is incorrect. Try again."
                                 }
                                 newPinInput.length != 4 -> {
