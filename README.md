@@ -4,6 +4,28 @@ EazyPay is an **offline-first, NFC-enabled campus cashless payment platform** de
 
 ---
 
+
+## 📦 Downloadable Demo Build
+
+EazyPay is currently safe to share as a **demo/prototype APK** for reviewers and stakeholders. It is **not** a live-money payment app.
+
+To build the shareable internal demo APK from a JDK 17 Android build environment:
+
+```bash
+./scripts/build_share_apk.sh
+```
+
+The script copies the debug APK and SHA-256 checksum to:
+
+```text
+dist/EazyPay-demo-debug.apk
+dist/EazyPay-demo-debug.apk.sha256
+```
+
+See [`DISTRIBUTION.md`](DISTRIBUTION.md) for release-signing instructions and distribution safety notes.
+
+---
+
 ## 📊 Project Status & Implementation Progress
 
 Below is the status of the EazyPay Android payment applet:
