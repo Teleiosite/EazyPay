@@ -11,5 +11,8 @@ data class TransactionEntity(
     val timestamp: Long,
     val amount: Double,
     val isDebit: Boolean,
-    val syncStatus: String // "Synced" or "Pending"
+    val syncStatus: String, // "Synced" or "Pending"
+    val hash: String = "",
+    val prevHash: String = "",
+    val signature: String = ""
 )

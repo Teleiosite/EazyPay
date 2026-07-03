@@ -26,6 +26,7 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
     val isSyncing = repository.isSyncing
     val student = repository.student
     val vendor = repository.vendor
+
     val offers = repository.offers
     val transactions = repository.transactions.stateIn(
         scope = viewModelScope,
@@ -128,7 +129,6 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun verifyPin(pin: String): Boolean = repository.verifyPin(pin)
-
     fun appendPinChar(char: Char, onPinComplete: () -> Unit) {
         if (_isLockedOut.value) return
         if (_pinBuffer.value.length < 4) {
@@ -296,5 +296,22 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             repository.syncPending()
         }
+    }
+
+    fun getDevicePublicKeyBase64(): String {
+        return try {
+            val keyPair = repository.getDeviceKeyPair()
+            android.util.Base64.encodeToString(keyPair.public.encoded, android.util.Base64.NO_WRAP)
+        } catch (e: Exception) {
+            "UNAVAILABLE"
+        }
+    }
+
+    fun isPhysicalNfcAvailable(): Boolean {
+        return repository.isNfcHardwareAvailable(getApplication())
+    }
+
+    fun isPhysicalNfcEnabled(): Boolean {
+        return repository.isNfcHardwareEnabled(getApplication())
     }
 }

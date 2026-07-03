@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.example.ui.EazyPayViewModel
@@ -1119,6 +1120,7 @@ fun VendorProfileScreen(
     onSignOut: () -> Unit
 ) {
     val vendorUser by viewModel.vendor.collectAsState()
+    val clipboardManager = LocalClipboardManager.current
     var activeModal by remember { mutableStateOf<String?>(null) }
 
     Column(
@@ -1226,6 +1228,122 @@ fun VendorProfileScreen(
                             Text(item.first, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         }
                         Icon(Icons.Default.ChevronRight, contentDescription = "Go", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "CRYPTOGRAPHIC LEDGER TELEMETRY",
+                color = TextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+            )
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Surface),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Border)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Public key row
+                    val fullPubKey = viewModel.getDevicePublicKeyBase64()
+                    val shortPubKey = if (fullPubKey.length > 20) {
+                        fullPubKey.take(10) + "..." + fullPubKey.takeLast(10)
+                    } else {
+                        fullPubKey
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("ECDSA OFFLINE SIGNER KEY (PUBLIC)", color = TextSecondary, fontSize = 9.sp)
+                            Text(
+                                text = shortPubKey,
+                                color = TextPrimary,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Button(
+                            onClick = { clipboardManager.setText(AnnotatedString(fullPubKey)) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Border),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Text("Copy Key", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Divider(color = Border, thickness = 1.dp)
+
+                    // Block Hash chain info
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Link,
+                            contentDescription = "Ledger Integrity",
+                            tint = PrimaryTeal,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text("LEDGER INTEGRITY PROTOCOL", color = TextSecondary, fontSize = 9.sp)
+                            Text(
+                                text = "SHA-256 Hash Chain Encrypted",
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Divider(color = Border, thickness = 1.dp)
+
+                    // Physical NFC info
+                    val nfcAvailable = viewModel.isPhysicalNfcAvailable()
+                    val nfcEnabled = viewModel.isPhysicalNfcEnabled()
+                    val nfcStatusText = when {
+                        !nfcAvailable -> "Hardware Not Found (Simulation Active)"
+                        nfcEnabled -> "Physical NFC Hardware Active"
+                        else -> "NFC Hardware Disabled"
+                    }
+                    val nfcColor = if (nfcAvailable && nfcEnabled) Success else PrimaryTeal
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Sensors,
+                            contentDescription = "NFC Hardware",
+                            tint = nfcColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text("PHYSICAL NFC DIAGNOSTICS", color = TextSecondary, fontSize = 9.sp)
+                            Text(
+                                text = nfcStatusText,
+                                color = TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -2320,7 +2438,6 @@ fun PasscodeSecurityModal(
     viewModel: EazyPayViewModel,
     onDismiss: () -> Unit
 ) {
-    val currentPin by viewModel.userPin.collectAsState()
     val coroutineScope = rememberCoroutineScope()
     
     var oldPinText by remember { mutableStateOf("") }
@@ -2452,7 +2569,7 @@ fun PasscodeSecurityModal(
 
                 Button(
                     onClick = {
-                        if (oldPinText != currentPin) {
+                        if (!viewModel.verifyPin(oldPinText)) {
                             pinErrorText = "Incorrect current PIN. (Try default '1234')"
                             pinSuccessText = ""
                         } else if (newPinText.length != 4) {

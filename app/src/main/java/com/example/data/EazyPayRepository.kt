@@ -1,6 +1,15 @@
 package com.example.data
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.nfc.NfcAdapter
+import android.util.Base64
+import java.security.KeyPair
+import java.security.PrivateKey
+import java.security.PublicKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -104,10 +113,75 @@ class EazyPayRepository(context: Context) {
     // Transactions list flow from database
     val transactions: Flow<List<TransactionEntity>> = dao.getAllTransactions()
 
+    private var cachedKeyPair: KeyPair? = null
+
+    fun getDeviceKeyPair(): KeyPair {
+        cachedKeyPair?.let { return it }
+        val pubBase64 = prefs.getString("device_pub_key", null)
+        val privBase64 = prefs.getString("device_priv_key", null)
+        if (pubBase64 != null && privBase64 != null) {
+            return try {
+                val pubBytes = Base64.decode(pubBase64, Base64.NO_WRAP)
+                val privBytes = Base64.decode(privBase64, Base64.NO_WRAP)
+                val pub = SecurityUtils.getPublicKeyFromBytes(pubBytes)
+                val priv = SecurityUtils.getPrivateKeyFromBytes(privBytes)
+                val pair = KeyPair(pub, priv)
+                cachedKeyPair = pair
+                pair
+            } catch (e: Exception) {
+                generateAndSaveNewKeyPair()
+            }
+        } else {
+            return generateAndSaveNewKeyPair()
+        }
+    }
+
+    private fun generateAndSaveNewKeyPair(): KeyPair {
+        val pair = SecurityUtils.generateEcKeyPair()
+        prefs.edit()
+            .putString("device_pub_key", Base64.encodeToString(pair.public.encoded, Base64.NO_WRAP))
+            .putString("device_priv_key", Base64.encodeToString(pair.private.encoded, Base64.NO_WRAP))
+            .apply()
+        cachedKeyPair = pair
+        return pair
+    }
+
+    fun isNfcHardwareAvailable(context: Context): Boolean {
+        return NfcAdapter.getDefaultAdapter(context) != null
+    }
+
+    fun isNfcHardwareEnabled(context: Context): Boolean {
+        val adapter = NfcAdapter.getDefaultAdapter(context)
+        return adapter?.isEnabled == true
+    }
+
     init {
         // Initial seeding is performed in background
         kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             seedInitialData()
+        }
+
+        // Automatic Network Monitoring for auto-sync of pending transactions when connection restores
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        if (connectivityManager != null) {
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            try {
+                connectivityManager.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        super.onAvailable(network)
+                        // Auto-sync when internet returns and we are not explicitly forced offline
+                        if (!_isOffline.value) {
+                            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                syncPending()
+                            }
+                        }
+                    }
+                })
+            } catch (e: Exception) {
+                // Safe fallback for standard JVM environments or restricted permissions
+            }
         }
     }
 
@@ -127,7 +201,6 @@ class EazyPayRepository(context: Context) {
 
         return hashedPin
     }
-
     fun setRegistered(registered: Boolean, phone: String? = null, role: String? = null) {
         val editor = prefs.edit().putBoolean("is_registered", registered)
         if (role != null) {
@@ -225,7 +298,6 @@ class EazyPayRepository(context: Context) {
     }
 
     fun verifyPin(pin: String): Boolean = SecurityUtils.verifyPin(pin, _pinHash.value)
-
     suspend fun topUpWallet(amount: Double) {
         val currentStudent = _student.value
         val updatedStudent = currentStudent.copy(balance = currentStudent.balance + amount)
@@ -250,14 +322,27 @@ class EazyPayRepository(context: Context) {
         isDebit: Boolean,
         status: String = if (_isOffline.value) "Pending" else "Synced"
     ) {
+        val lastTxList = dao.getAllTransactions().first()
+        val prevHash = lastTxList.firstOrNull()?.hash ?: "GENESIS"
+        val timestamp = System.currentTimeMillis()
+        val hash = SecurityUtils.calculateHash(prevHash, title, amount, timestamp)
+        
+        // Let's sign the payload: "title|amount|timestamp|isDebit"
+        val payload = "$title|$amount|$timestamp|$isDebit"
+        val keyPair = getDeviceKeyPair()
+        val signature = SecurityUtils.signPayload(payload, keyPair.private)
+
         dao.insertTransaction(
             TransactionEntity(
                 title = title,
                 category = category,
-                timestamp = System.currentTimeMillis(),
+                timestamp = timestamp,
                 amount = amount,
                 isDebit = isDebit,
-                syncStatus = status
+                syncStatus = status,
+                hash = hash,
+                prevHash = prevHash,
+                signature = signature
             )
         )
 
@@ -333,34 +418,65 @@ class EazyPayRepository(context: Context) {
         // Only seed if empty
         val list = dao.getAllTransactions().first()
         if (list.isEmpty()) {
+            val keyPair = getDeviceKeyPair()
+            
+            val t1Title = "Wallet top-up"
+            val t1Amt = 2000.0
+            val t1Time = System.currentTimeMillis() - 7200000
+            val t1Prev = "GENESIS"
+            val t1Hash = SecurityUtils.calculateHash(t1Prev, t1Title, t1Amt, t1Time)
+            val t1Sig = SecurityUtils.signPayload("$t1Title|$t1Amt|$t1Time|false", keyPair.private)
             dao.insertTransaction(
                 TransactionEntity(
-                    title = "Wallet top-up",
+                    title = t1Title,
                     category = "topup",
-                    timestamp = System.currentTimeMillis() - 7200000, // 2 hours ago
-                    amount = 2000.0,
+                    timestamp = t1Time,
+                    amount = t1Amt,
                     isDebit = false,
-                    syncStatus = "Synced"
+                    syncStatus = "Synced",
+                    hash = t1Hash,
+                    prevHash = t1Prev,
+                    signature = t1Sig
                 )
             )
+            
+            val t2Title = "Mama Tee's Kitchen"
+            val t2Amt = 650.0
+            val t2Time = System.currentTimeMillis() - 3600000
+            val t2Prev = t1Hash
+            val t2Hash = SecurityUtils.calculateHash(t2Prev, t2Title, t2Amt, t2Time)
+            val t2Sig = SecurityUtils.signPayload("$t2Title|$t2Amt|$t2Time|true", keyPair.private)
             dao.insertTransaction(
                 TransactionEntity(
-                    title = "Mama Tee's Kitchen",
+                    title = t2Title,
                     category = "food",
-                    timestamp = System.currentTimeMillis() - 3600000, // 1 hour ago
-                    amount = 650.0,
+                    timestamp = t2Time,
+                    amount = t2Amt,
                     isDebit = true,
-                    syncStatus = "Synced"
+                    syncStatus = "Synced",
+                    hash = t2Hash,
+                    prevHash = t2Prev,
+                    signature = t2Sig
                 )
             )
+            
+            val t3Title = "Keke transport"
+            val t3Amt = 210.0
+            val t3Time = System.currentTimeMillis() - 1800000
+            val t3Prev = t2Hash
+            val t3Hash = SecurityUtils.calculateHash(t3Prev, t3Title, t3Amt, t3Time)
+            val t3Sig = SecurityUtils.signPayload("$t3Title|$t3Amt|$t3Time|true", keyPair.private)
             dao.insertTransaction(
                 TransactionEntity(
-                    title = "Keke transport",
+                    title = t3Title,
                     category = "transport",
-                    timestamp = System.currentTimeMillis() - 1800000, // 30 mins ago
-                    amount = 210.0,
+                    timestamp = t3Time,
+                    amount = t3Amt,
                     isDebit = true,
-                    syncStatus = "Synced"
+                    syncStatus = "Synced",
+                    hash = t3Hash,
+                    prevHash = t3Prev,
+                    signature = t3Sig
                 )
             )
         }
