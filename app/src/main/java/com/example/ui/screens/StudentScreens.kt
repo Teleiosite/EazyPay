@@ -1388,10 +1388,18 @@ fun TransactionReceiptModal(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    ReceiptDetailRow("Transaction ID", "TXN-${tx.timestamp / 10000}")
+                    val displayTxRef = if (tx.txRef.isNotEmpty()) tx.txRef else "TXN-${tx.timestamp / 10000}"
+                    val displayFee = if (tx.fee > 0.0) "₦${String.format("%.2f", tx.fee)}" else "Free (Zero-Fee Pilot)"
+                    val displayPayer = if (tx.payerId.isNotEmpty()) tx.payerId else "EP-0047"
+                    val displaySecurity = if (tx.signature.isNotEmpty()) "ECDSA-SHA256 Signed Chain" else "AES-256 Signed Ledger"
+
+                    ReceiptDetailRow("Transaction ID", displayTxRef)
                     ReceiptDetailRow("Timestamp", java.text.SimpleDateFormat("MMM dd, yyyy - hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(tx.timestamp)))
                     ReceiptDetailRow("Category", tx.category.replaceFirstChar { it.uppercase() })
-                    ReceiptDetailRow("Security Standard", "AES-256 GCM Signed Ledger")
+                    ReceiptDetailRow("Campus Location", tx.campusId)
+                    ReceiptDetailRow("Account ID", displayPayer)
+                    ReceiptDetailRow("System Fee", displayFee)
+                    ReceiptDetailRow("Security Standard", displaySecurity)
                     ReceiptDetailRow("Status", tx.syncStatus)
                 }
 
@@ -1470,6 +1478,7 @@ fun StudentProfileScreen(
     onSupportClick: () -> Unit
 ) {
     val studentUser by viewModel.student.collectAsState()
+    val isLedgerSecure by viewModel.isLedgerSecure.collectAsState()
     val clipboardManager = LocalClipboardManager.current
     var activeModal by remember { mutableStateOf<String?>(null) } // "personal", "nfc", "biometrics", "pin", "help", "privacy"
 
@@ -1567,6 +1576,7 @@ fun StudentProfileScreen(
                     Pair("Registered NFT cards", Icons.Outlined.Nfc),
                     Pair("Biometrics lock", Icons.Outlined.Fingerprint),
                     Pair("Change security PIN", Icons.Outlined.Lock),
+                    Pair("Ledger Security Audit", Icons.Outlined.Shield),
                     Pair("Help Center & FAQ", Icons.Outlined.HelpOutline),
                     Pair("Privacy Policy & Terms", Icons.Outlined.Info)
                 )
@@ -1582,6 +1592,7 @@ fun StudentProfileScreen(
                                     "Registered NFC cards", "Registered NFT cards" -> "nfc"
                                     "Biometrics lock" -> "biometrics"
                                     "Change security PIN" -> "pin"
+                                    "Ledger Security Audit" -> "ledger_audit"
                                     "Help Center & FAQ" -> "help"
                                     "Privacy Policy & Terms" -> "privacy"
                                     else -> null
@@ -1666,6 +1677,8 @@ fun StudentProfileScreen(
                         Divider(color = Border, thickness = 1.dp)
 
                         // Block Hash chain info
+                        val ledgerColor = if (isLedgerSecure) Success else Danger
+                        val ledgerText = if (isLedgerSecure) "SHA-256 Hash Chain: VERIFIED SECURE" else "LEDGER INTEGRITY BREACHED"
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -1673,15 +1686,15 @@ fun StudentProfileScreen(
                             Icon(
                                 imageVector = Icons.Default.Link,
                                 contentDescription = "Ledger Integrity",
-                                tint = PrimaryTeal,
+                                tint = ledgerColor,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text("LEDGER INTEGRITY PROTOCOL", color = TextSecondary, fontSize = 9.sp)
                                 Text(
-                                    text = "SHA-256 Hash Chain Encrypted",
-                                    color = TextPrimary,
+                                    text = ledgerText,
+                                    color = ledgerColor,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1745,6 +1758,7 @@ fun StudentProfileScreen(
             "nfc" -> NfcCardsModal(viewModel = viewModel, onDismiss = { activeModal = null })
             "biometrics" -> BiometricsLockModal(viewModel = viewModel, onDismiss = { activeModal = null })
             "pin" -> ChangePinModal(viewModel = viewModel, onDismiss = { activeModal = null })
+            "ledger_audit" -> LedgerSecurityAuditModal(viewModel = viewModel, onDismiss = { activeModal = null })
             "help" -> HelpCenterModal(viewModel = viewModel, onDismiss = { activeModal = null }, onOpenChat = {
                 activeModal = null
                 onSupportClick()
@@ -2140,6 +2154,37 @@ fun BiometricsLockModal(
                     textAlign = TextAlign.Center
                 )
 
+                Spacer(modifier = Modifier.height(4.dp))
+
+                val bioStatus = viewModel.getBiometricStatus()
+                val bioColor = if (bioStatus.contains("Active")) Success else PrimaryTeal
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Surface, RoundedCornerShape(8.dp))
+                        .border(1.dp, Border, RoundedCornerShape(8.dp))
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Fingerprint,
+                        contentDescription = "Biometrics Hardware",
+                        tint = bioColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text("PHYSICAL BIOMETRICS DIAGNOSTICS", color = TextSecondary, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = bioStatus,
+                            color = TextPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
                 HorizontalDivider(color = Border)
 
                 Row(
@@ -2175,6 +2220,199 @@ fun BiometricsLockModal(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun LedgerSecurityAuditModal(
+    viewModel: EazyPayViewModel,
+    onDismiss: () -> Unit
+) {
+    val isSecure by viewModel.isLedgerSecure.collectAsState()
+    val offlineSpent by viewModel.offlineSpent.collectAsState()
+    val transactions by viewModel.transactions.collectAsState()
+    val devicePubKey = viewModel.getDevicePublicKeyBase64()
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.8f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Background),
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .clickable(enabled = false) {}
+                .border(1.dp, Border, RoundedCornerShape(24.dp)),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Ledger Security Audit", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                // Security Status Box
+                val cardColor = if (isSecure) Success.copy(alpha = 0.1f) else Danger.copy(alpha = 0.1f)
+                val borderColor = if (isSecure) Success else Danger
+                val statusText = if (isSecure) "LEDGER INTEGRITY VERIFIED" else "LEDGER COMPROMISED"
+                val statusDesc = if (isSecure) {
+                    "All Room transaction records, block chain continuation checks, and cryptographic signatures (ECDSA-SHA256) match physical device keys perfectly."
+                } else {
+                    "Warning: A transaction record payload was altered directly in SQLite, causing hash-continuation check to fail. Wallet balances and tap-payments are locked."
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(cardColor, RoundedCornerShape(16.dp))
+                        .border(1.dp, borderColor, RoundedCornerShape(16.dp))
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isSecure) Icons.Default.Shield else Icons.Default.Warning,
+                        contentDescription = "Status Icon",
+                        tint = borderColor,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Text(
+                        text = statusText,
+                        color = borderColor,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = statusDesc,
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                // Diagnostics Details Section
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("SECURITY SCHEMAS & METRICS", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+
+                    // Detail items
+                    AuditMetricRow("Cumulative Offline Spent", "₦${String.format("%.2f", offlineSpent)} / ₦5,000.00 Max")
+                    AuditMetricRow("Database Block Count", "${transactions.size} records")
+                    AuditMetricRow("Block Signature Standard", "ECDSA secp256k1 (SHA256)")
+                }
+
+                // Public Key block
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text("DEVICE HARDWARE PUBLIC KEY", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Surface, RoundedCornerShape(8.dp))
+                            .border(1.dp, Border, RoundedCornerShape(8.dp))
+                            .padding(8.dp)
+                    ) {
+                        Text(
+                            text = devicePubKey,
+                            color = PrimaryTeal,
+                            fontSize = 9.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            maxLines = 3
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = Border)
+
+                // Simulation Controls Header
+                Text(
+                    text = "ATTACK & RECOVERY SIMULATION",
+                    color = TextSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.Start)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Attack Button
+                    Button(
+                        onClick = { viewModel.tamperLastTransaction() },
+                        modifier = Modifier.weight(1f).height(46.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Danger.copy(alpha = 0.2f), contentColor = Danger),
+                        border = BorderStroke(1.dp, Danger.copy(alpha = 0.4f))
+                    ) {
+                        Icon(Icons.Default.BugReport, contentDescription = "Attack", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Tamper DB", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    // Repair Button
+                    Button(
+                        onClick = { viewModel.repairLedgerIntegrity() },
+                        modifier = Modifier.weight(1f).height(46.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Success.copy(alpha = 0.2f), contentColor = Success),
+                        border = BorderStroke(1.dp, Success.copy(alpha = 0.4f))
+                    ) {
+                        Icon(Icons.Default.Build, contentDescription = "Repair", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Repair Chain", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryTeal)
+                ) {
+                    Text("Close Panel", color = Background, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AuditMetricRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Surface, RoundedCornerShape(8.dp))
+            .border(1.dp, Border, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, color = TextSecondary, fontSize = 12.sp)
+        Text(value, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }
 

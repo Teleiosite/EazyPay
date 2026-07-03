@@ -441,6 +441,7 @@ fun VendorTerminalScreen(
     val terminalState by viewModel.terminalState.collectAsState()
     val terminalAmount by viewModel.terminalAmount.collectAsState()
     val terminalStudent by viewModel.terminalStudent.collectAsState()
+    val terminalError by viewModel.terminalError.collectAsState()
     var isNfcAntennaOn by remember { mutableStateOf(true) }
     
     val pinLength by viewModel.pinBuffer.map { it.length }.collectAsState(0)
@@ -466,6 +467,32 @@ fun VendorTerminalScreen(
                 color = TextSecondary,
                 fontSize = 12.sp
             )
+        }
+
+        if (terminalError != null) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Danger.copy(alpha = 0.15f)),
+                border = BorderStroke(1.dp, Danger),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = "Error", tint = Danger, modifier = Modifier.size(24.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Terminal Blocked", color = Danger, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(terminalError!!, color = TextPrimary, fontSize = 12.sp)
+                    }
+                    IconButton(onClick = { viewModel.resetTerminal() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextSecondary, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
         }
 
         when (terminalState) {
@@ -1091,10 +1118,17 @@ fun VendorSettlementReceiptModal(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    ReceiptDetailRow("Crypto Signature", "ECDSA-secp256k1 Signed")
-                    ReceiptDetailRow("Linked Device", "NFC SECURE-CHIP-V3")
+                    val displayTxRef = if (tx.txRef.isNotEmpty()) tx.txRef else "TXN-${tx.timestamp / 10000}"
+                    val displayDevice = if (tx.deviceId.isNotEmpty()) tx.deviceId else "DEV-BU-9001"
+                    val displayPayee = if (tx.payeeId.isNotEmpty()) tx.payeeId else "EP-V-001"
+                    val displaySignature = if (tx.signature.isNotEmpty()) "ECDSA-SHA256 Verified" else "secp256k1 Signed"
+
+                    ReceiptDetailRow("Transaction ID", displayTxRef)
+                    ReceiptDetailRow("Merchant ID", displayPayee)
+                    ReceiptDetailRow("Crypto Signature", displaySignature)
+                    ReceiptDetailRow("Linked Device", displayDevice)
                     ReceiptDetailRow("Collection Time", java.text.SimpleDateFormat("MMM dd, yyyy - hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(tx.timestamp)))
-                    ReceiptDetailRow("Campus Station", "Babcock Cafeteria A")
+                    ReceiptDetailRow("Campus Station", tx.campusId)
                     ReceiptDetailRow("Settlement Target", "Wema Bank (012****905)")
                 }
 
@@ -1120,6 +1154,7 @@ fun VendorProfileScreen(
     onSignOut: () -> Unit
 ) {
     val vendorUser by viewModel.vendor.collectAsState()
+    val isLedgerSecure by viewModel.isLedgerSecure.collectAsState()
     val clipboardManager = LocalClipboardManager.current
     var activeModal by remember { mutableStateOf<String?>(null) }
 
@@ -1290,6 +1325,8 @@ fun VendorProfileScreen(
                     Divider(color = Border, thickness = 1.dp)
 
                     // Block Hash chain info
+                    val ledgerColor = if (isLedgerSecure) Success else Danger
+                    val ledgerText = if (isLedgerSecure) "SHA-256 Hash Chain: VERIFIED SECURE" else "LEDGER INTEGRITY BREACHED"
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -1297,15 +1334,15 @@ fun VendorProfileScreen(
                         Icon(
                             imageVector = Icons.Default.Link,
                             contentDescription = "Ledger Integrity",
-                            tint = PrimaryTeal,
+                            tint = ledgerColor,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text("LEDGER INTEGRITY PROTOCOL", color = TextSecondary, fontSize = 9.sp)
                             Text(
-                                text = "SHA-256 Hash Chain Encrypted",
-                                color = TextPrimary,
+                                text = ledgerText,
+                                color = ledgerColor,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold
                             )

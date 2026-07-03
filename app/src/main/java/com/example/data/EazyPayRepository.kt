@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.GlobalScope
@@ -46,7 +47,54 @@ data class Offer(
 class EazyPayRepository(context: Context) {
     private val db = AppDatabase.getDatabase(context)
     private val dao = db.transactionDao()
-    private val prefs = context.getSharedPreferences("eazypay_prefs", Context.MODE_PRIVATE)
+    private val prefs = try {
+        val masterKeyAlias = androidx.security.crypto.MasterKeys.getOrCreate(androidx.security.crypto.MasterKeys.AES256_GCM_SPEC)
+        val securePrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
+            "eazypay_secure_prefs",
+            masterKeyAlias,
+            context,
+            androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+        
+        // Migrate legacy prefs if they exist
+        val legacyPrefs = context.getSharedPreferences("eazypay_prefs", Context.MODE_PRIVATE)
+        if (legacyPrefs.all.isNotEmpty() && !securePrefs.contains("migrated_to_secure")) {
+            val editor = securePrefs.edit()
+            for ((key, value) in legacyPrefs.all) {
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Long -> editor.putLong(key, value)
+                }
+            }
+            editor.putBoolean("migrated_to_secure", true)
+            editor.apply()
+            try {
+                legacyPrefs.edit().clear().apply()
+            } catch (ex: Exception) {
+                // Ignore clear failure
+            }
+        }
+        securePrefs
+    } catch (e: Exception) {
+        android.util.Log.e("EazyPayRepository", "Failed to initialize EncryptedSharedPreferences, falling back", e)
+        try {
+            context.deleteSharedPreferences("eazypay_secure_prefs")
+            val masterKeyAlias = androidx.security.crypto.MasterKeys.getOrCreate(androidx.security.crypto.MasterKeys.AES256_GCM_SPEC)
+            androidx.security.crypto.EncryptedSharedPreferences.create(
+                "eazypay_secure_prefs",
+                masterKeyAlias,
+                context,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (ex: Exception) {
+            context.getSharedPreferences("eazypay_prefs", Context.MODE_PRIVATE)
+        }
+    }
 
     // Active Role state: "student" or "vendor"
     private val _currentRole = MutableStateFlow(prefs.getString("current_role", "student") ?: "student")
@@ -320,7 +368,13 @@ class EazyPayRepository(context: Context) {
         category: String,
         amount: Double,
         isDebit: Boolean,
-        status: String = if (_isOffline.value) "Pending" else "Synced"
+        status: String = if (_isOffline.value) "Pending" else "Synced",
+        payerId: String = if (isDebit) _student.value.id else "",
+        payeeId: String = if (!isDebit) _vendor.value.id else "",
+        deviceId: String = "DEV-BU-${_student.value.id.takeLast(4)}",
+        nfcCardId: String = "NFC-BU-10482",
+        fee: Double = if (isDebit && category != "topup") 10.0 else 0.0, // ₦10 standard fee
+        campusId: String = "Babcock-Main"
     ) {
         val lastTxList = dao.getAllTransactions().first()
         val prevHash = lastTxList.firstOrNull()?.hash ?: "GENESIS"
@@ -332,6 +386,9 @@ class EazyPayRepository(context: Context) {
         val keyPair = getDeviceKeyPair()
         val signature = SecurityUtils.signPayload(payload, keyPair.private)
 
+        val txRef = "TXN-${category.uppercase()}-${timestamp}-${(1000..9999).random()}"
+        val idempotencyKey = java.util.UUID.randomUUID().toString()
+
         dao.insertTransaction(
             TransactionEntity(
                 title = title,
@@ -342,7 +399,15 @@ class EazyPayRepository(context: Context) {
                 syncStatus = status,
                 hash = hash,
                 prevHash = prevHash,
-                signature = signature
+                signature = signature,
+                txRef = txRef,
+                payerId = payerId,
+                payeeId = payeeId,
+                deviceId = deviceId,
+                nfcCardId = nfcCardId,
+                fee = fee,
+                campusId = campusId,
+                idempotencyKey = idempotencyKey
             )
         )
 
@@ -404,6 +469,73 @@ class EazyPayRepository(context: Context) {
         }
         return false
     }
+
+    suspend fun verifyLocalLedgerIntegrity(): Boolean {
+        val list = dao.getAllTransactions().first().reversed()
+        if (list.isEmpty()) return true
+        
+        var expectedPrevHash = "GENESIS"
+        val keyPair = getDeviceKeyPair()
+        
+        for (tx in list) {
+            // 1. Verify prevHash matches what we expect
+            if (tx.prevHash != expectedPrevHash) {
+                return false
+            }
+            // 2. Verify hash is correct
+            val calculatedHash = SecurityUtils.calculateHash(tx.prevHash, tx.title, tx.amount, tx.timestamp)
+            if (tx.hash != calculatedHash) {
+                return false
+            }
+            // 3. Verify signature
+            val payload = "${tx.title}|${tx.amount}|${tx.timestamp}|${tx.isDebit}"
+            val signatureValid = SecurityUtils.verifyPayload(payload, tx.signature, keyPair.public)
+            if (!signatureValid) {
+                return false
+            }
+            // 4. Move expectedPrevHash forward
+            expectedPrevHash = tx.hash
+        }
+        return true
+    }
+
+    suspend fun tamperLastTransaction(): Boolean {
+        val lastTx = dao.getLastTransaction() ?: return false
+        // Maliciously alter transaction details directly in DB without correct signatures/hashes
+        val tamperedTx = lastTx.copy(amount = lastTx.amount + 5000.0)
+        dao.insertTransaction(tamperedTx)
+        return true
+    }
+
+    suspend fun repairLedgerIntegrity(): Boolean {
+        val list = dao.getAllTransactions().first().reversed()
+        if (list.isEmpty()) return true
+        
+        var expectedPrevHash = "GENESIS"
+        val keyPair = getDeviceKeyPair()
+        
+        for (tx in list) {
+            val correctHash = SecurityUtils.calculateHash(expectedPrevHash, tx.title, tx.amount, tx.timestamp)
+            val payload = "${tx.title}|${tx.amount}|${tx.timestamp}|${tx.isDebit}"
+            val correctSig = SecurityUtils.signPayload(payload, keyPair.private)
+            
+            val repairedTx = tx.copy(
+                prevHash = expectedPrevHash,
+                hash = correctHash,
+                signature = correctSig
+            )
+            dao.insertTransaction(repairedTx)
+            expectedPrevHash = correctHash
+        }
+        return true
+    }
+
+    suspend fun getOfflineSpentCumulative(): Double {
+        val allTx = dao.getAllTransactions().first()
+        return allTx.filter { it.syncStatus == "Pending" && it.isDebit }.sumOf { it.amount }
+    }
+
+    fun getOfflineSpendCeiling(): Double = 5000.0
 
     suspend fun syncPending() {
         if (_isOffline.value) return

@@ -14,5 +14,15 @@ data class TransactionEntity(
     val syncStatus: String, // "Synced" or "Pending"
     val hash: String = "",
     val prevHash: String = "",
-    val signature: String = ""
+    val signature: String = "",
+    
+    // Production & Audit Extensions
+    val txRef: String = "",
+    val payerId: String = "",
+    val payeeId: String = "",
+    val deviceId: String = "",
+    val nfcCardId: String = "",
+    val fee: Double = 0.0,
+    val campusId: String = "Babcock-Main",
+    val idempotencyKey: String = ""
 )

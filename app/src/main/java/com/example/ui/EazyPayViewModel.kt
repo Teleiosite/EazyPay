@@ -34,6 +34,24 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
         initialValue = emptyList()
     )
 
+    private val _isLedgerSecure = MutableStateFlow(true)
+    val isLedgerSecure: StateFlow<Boolean> = _isLedgerSecure
+
+    private val _offlineSpent = MutableStateFlow(0.0)
+    val offlineSpent: StateFlow<Double> = _offlineSpent
+
+    private val _terminalError = MutableStateFlow<String?>(null)
+    val terminalError: StateFlow<String?> = _terminalError
+
+    init {
+        viewModelScope.launch {
+            transactions.collect {
+                _isLedgerSecure.value = repository.verifyLocalLedgerIntegrity()
+                _offlineSpent.value = repository.getOfflineSpentCumulative()
+            }
+        }
+    }
+
     // Interactive Demo / Payment States
     private val _demoActive = MutableStateFlow(false)
     val demoActive: StateFlow<Boolean> = _demoActive
@@ -212,6 +230,7 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
     fun resetTerminal() {
         _terminalState.value = 1
         _pinBuffer.value = ""
+        _terminalError.value = null
     }
 
     fun chargeStudentFromTerminal(onComplete: () -> Unit) {
@@ -225,12 +244,46 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val amount = _terminalAmount.value.toDoubleOrNull() ?: 200.0
             
+            // 1. Offline Cumulative Limit Check
+            if (isOffline.value) {
+                val currentOfflineSpent = repository.getOfflineSpentCumulative()
+                val ceiling = repository.getOfflineSpendCeiling()
+                if (currentOfflineSpent + amount > ceiling) {
+                    _terminalError.value = "Offline limit exceeded (Max ₦5,000). Reconnect to sync."
+                    return@launch
+                }
+            }
+            
+            // 2. Cryptographic Ledger Security Check
+            val isSecure = repository.verifyLocalLedgerIntegrity()
+            if (!isSecure) {
+                _terminalError.value = "Security Error: Local ledger compromised. Terminal locked."
+                return@launch
+            }
+            
+            _terminalError.value = null
             // Deduct from student balance (representing student side)
             // And add to vendor earnings (representing vendor side)
             repository.performNfcPayment("Terminal: Musa Ibrahim", amount, isStudentDebit = true)
             repository.performNfcPayment("Payment from " + student.value.name, amount, isStudentDebit = false)
             
             _terminalState.value = 4 // Success
+        }
+    }
+
+    fun tamperLastTransaction() {
+        viewModelScope.launch {
+            repository.tamperLastTransaction()
+            _isLedgerSecure.value = repository.verifyLocalLedgerIntegrity()
+            _offlineSpent.value = repository.getOfflineSpentCumulative()
+        }
+    }
+
+    fun repairLedgerIntegrity() {
+        viewModelScope.launch {
+            repository.repairLedgerIntegrity()
+            _isLedgerSecure.value = repository.verifyLocalLedgerIntegrity()
+            _offlineSpent.value = repository.getOfflineSpentCumulative()
         }
     }
 
@@ -313,5 +366,20 @@ class EazyPayViewModel(application: Application) : AndroidViewModel(application)
 
     fun isPhysicalNfcEnabled(): Boolean {
         return repository.isNfcHardwareEnabled(getApplication())
+    }
+
+    fun getBiometricStatus(): String {
+        return try {
+            val biometricManager = androidx.biometric.BiometricManager.from(getApplication())
+            when (biometricManager.canAuthenticate(androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG or androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL)) {
+                androidx.biometric.BiometricManager.BIOMETRIC_SUCCESS -> "Hardware Active & Enrolled"
+                androidx.biometric.BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> "Hardware Not Found (Simulation Active)"
+                androidx.biometric.BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> "Hardware Busy/Unavailable"
+                androidx.biometric.BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> "Hardware Present (No Fingerprints Enrolled)"
+                else -> "Biometrics Unsupported"
+            }
+        } catch (e: Exception) {
+            "Hardware Not Found (Simulation Active)"
+        }
     }
 }

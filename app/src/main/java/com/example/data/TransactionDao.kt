@@ -17,6 +17,9 @@ interface TransactionDao {
     @Query("UPDATE transactions SET syncStatus = 'Synced' WHERE syncStatus = 'Pending'")
     suspend fun syncPendingTransactions()
 
+    @Query("SELECT * FROM transactions ORDER BY id DESC LIMIT 1")
+    suspend fun getLastTransaction(): TransactionEntity?
+
     @Query("DELETE FROM transactions")
     suspend fun deleteAllTransactions()
 }
